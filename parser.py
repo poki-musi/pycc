@@ -216,7 +216,7 @@ class CParser(Parser):
 
     @_(r"KW_VOID")
     def type(self, p):
-        return p[0]
+        return TypeVoid
 
     # --- Expresiones --- #
 
@@ -228,7 +228,7 @@ class CParser(Parser):
 
     @_('ID "=" assign')
     def assign(self, p):
-        return AssignExp(p[0], p[2])
+        return AssignExp(VarExp(p[0]), p[2])
 
     @_("or_exp")
     def assign(self, p):

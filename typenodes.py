@@ -71,4 +71,5 @@ class TypeFun(Type):
         return isinstance(typ, TypeFun) and typ.params == self.params and typ.ret == self.ret
 
 TypeVoid = TypeName(name="void", size=0)
-TypeInt = TypeName("int")
+TypeInt = TypeName("int", size=4)
+TypeChar = TypeName("char", size=1)

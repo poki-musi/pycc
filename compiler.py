@@ -28,6 +28,16 @@ EBP = Reg("ebp")
 ESP = Reg("esp")
 
 
+@monkeypatch(Local)
+def as_reg(self: Local) -> str:
+    return EBP + self.addr
+
+
+@monkeypatch(Global)
+def as_reg(self: Global) -> str:
+    return self.name
+
+
 def S(n):
     return f"${n}"
 
@@ -35,8 +45,10 @@ def S(n):
 @dataclass
 class Compiler:
     functions: dict[str, Fun]
-    prelude: dict[str, None] = field(default_factory=dict)
     cur_fun: Fun = None
+    label_count: int = 0
+    globals: list[None] = field(default_factory=list)  # TODO
+    constants: list[str] = field(default_factory=list)
     asm: list[str] = field(default_factory=list)
 
     @staticmethod
@@ -48,24 +60,25 @@ class Compiler:
         return self
 
     def generate(self):
-        return "\n".join(self.asm)
+        def gen():
+            if self.globals:
+                yield from self.globals
+                yield ""
 
-    def var(self, name: str) -> Union[int, None]:
-        if name in self.cur_fun.locals_:
-            return EBX - self.cur_fun.locals_[name].addr
+            if self.constants:
+                yield " " * 4 + ".section  .rodata"
+                yield from self.constants
+                yield ""
+            yield from self.asm
 
-        try:
-            idx = self.cur_fun.params.index(name)
-            return EBX + (8 + 4 * idx)
-        except ValueError:
-            pass
+        return "\n".join(gen())
 
-        if name in self.globals_:
-            return self.globals_[name].addr
+    # --- Auxiliar Methods --- #
 
-        return None
-
-    # --- Instruction DSL --- #
+    def make_label(self, string: str) -> str:
+        off = self.label_count
+        self.label_count += 1
+        return string + str(off)
 
     def add_line(self, line):
         self.asm.append("    " + line)
@@ -73,63 +86,59 @@ class Compiler:
     def label(self, label):
         self.asm.append(label + ":")
 
+    def add_string(self, string: str) -> str:
+        label = "." + self.make_label("L")
+        self.constants.append(label)
+        self.constants.append(f"    .string {string}")
+        return label
+
+    def add_float(self, num: float) -> str:
+        self.label(self.make_label("L"))
+        self.add_line(f'.float "{num}"')
+
     def nl(self):
         self.add_line("")
-
-    def addl(self, orig, to):
-        self.add_line(f"addl {orig}, {to}")
-
-    def subl(self, orig, to):
-        self.add_line(f"subl {orig}, {to}")
-
-    def imull(self, orig, to):
-        self.add_line(f"imull {orig}, {to}")
-
-    def cdq(self):
-        self.add_line("cdq")
-
-    def idivl(self, orig):
-        self.add_line(f"idivl {orig}")
-
-    def pushl(self, reg):
-        self.add_line(f"pushl {reg}")
-
-    def popl(self, reg):
-        self.add_line(f"popl {reg}")
-
-    def movl(self, orig, to):
-        self.add_line(f"movl {orig}, {to}")
-
-    def neg(self, orig):
-        self.add_line(f"neg {orig}")
-
-    def call(self, label):
-        self.add_line(f"call {label}")
-
-    def ret(self):
-        self.add_line("ret")
 
     def emit_return(self):
         self.movl(EBP, ESP)
         self.popl(EBP)
         self.ret()
 
+    # fmt: off
+    def addl(self, orig, to): self.add_line(f'addl {orig}, {to}')
+    def subl(self, orig, to): self.add_line(f'subl {orig}, {to}')
+    def imull(self, orig, to): self.add_line(f'imull {orig}, {to}')
+    def movl(self, orig, to): self.add_line(f'movl {orig}, {to}')
+    def cmpl(self, orig, to): self.add_line(f'cmpl {orig}, {to}')
+    def leal(self, orig, to): self.add_line(f'leal {orig}, {to}')
+
+    def idvl(self, arg): self.add_line(f'idvl {arg}')
+    def pushl(self, arg): self.add_line(f'pushl {arg}')
+    def popl(self, arg): self.add_line(f'popl {arg}')
+    def neg(self, arg): self.add_line(f'neg {arg}')
+    def call(self, arg): self.add_line(f'call {arg}')
+
+    def j(self, arg): self.add_line(f'j {arg}')
+    def je(self, arg): self.add_line(f'je {arg}')
+    def jne(self, arg): self.add_line(f'jne {arg}')
+    def jge(self, arg): self.add_line(f'jge {arg}')
+    def jgt(self, arg): self.add_line(f'jgt {arg}')
+    def jle(self, arg): self.add_line(f'jle {arg}')
+    def jlt(self, arg): self.add_line(f'jlt {arg}')
+
+    def cdq(self): self.add_line(f'cdq')
+    def ret(self): self.add_line(f'ret')
+    # fmt: on
+
+
+# --- Instruction DSL --- #
+
 
 class CompilerError(Exception):
     ...
 
 
-@monkeypatch(Node)
-def compiler(self, _):
-    pass
-
-
 # --- Expressions --- #
-
-
-@monkeypatch(VarExp)
-def compile(self: VarExp, cmp: Compiler):
-    cmp.movl(cmp.var(self.lit), EAX)
 
 
 @monkeypatch(NumExp)
@@ -139,8 +148,13 @@ def compile(self: NumExp, cmp: Compiler):
 
 @monkeypatch(StrExp)
 def compile(self: StrExp, cmp: Compiler):
-    addr = cmp.add_string(self.lit)
-    cmp.movl(addr, EAX)
+    label = S(cmp.add_string(self.lit))
+    cmp.movl(label, EAX)
+
+
+@monkeypatch(VarExp)
+def compile(self: VarExp, cmp: Compiler):
+    cmp.movl(self.resolved_as.as_reg(), EAX)
 
 
 @monkeypatch(UnaryExp)
@@ -149,14 +163,39 @@ def compile(self: UnaryExp, cmp: Compiler):
 
     if self.op == "-":
         cmp.neg(EAX)
+    elif self.op == "&":
+        cmp.leal(EAX)
+    elif self.op == "!":
+        label = cmp.make_label(".J")
+        cmp.cmpl(S(0), EAX)
+        cmp.je(label)
+        cmp.movl(S(0), EAX)
+        cmp.label(label)
+
+
+JUMP_TYPES = {
+    "<": "jge",
+    ">": "jle",
+    ">=": "jlt",
+    "<=": "jgt",
+    "==": "jne",
+    "!=": "je",
+}
 
 
 @monkeypatch(BinaryExp)
 def compile(self: BinaryExp, cmp: Compiler):
-    if self.op == "||":
+    if self.op in {"&&", "||"}:
         self.exp1.compile(cmp)
-    if self.op == "&&":
-        self.exp1.compile(cmp)
+        j = cmp.make_label(".J")
+        cmp.cmpl(S(0), EAX)
+        if self.op == "&&":
+            cmp.je(j)
+        else:
+            cmp.jne(j)
+        self.exp2.compile(cmp)
+        cmp.label(j)
+
     else:
         self.exp1.compile(cmp)
         cmp.pushl(EAX)
@@ -174,57 +213,66 @@ def compile(self: BinaryExp, cmp: Compiler):
         elif self.op == "/":
             cmp.cdq()
             cmp.idivl(EBX)
+        else:
+            # remaining cases: <, >, <=, >=, ==, !=
+            cond_jump = getattr(cmp, JUMP_TYPES[self.op])
+
+            no = cmp.make_label(".J")
+            fin = cmp.make_label(".J")
+            cmp.cmpl(EAX, EBX)
+            cond_jump(no)
+            cmp.movl(S(1), EAX)
+            cmp.j(fin)
+
+            cmp.label(no)
+            cmp.movl(S(0), EAX)
+            cmp.label(fin)
+
+
+@monkeypatch(CallExp)
+def compile(self: CallExp, cmp: Compiler):
+    name = self.callee
+    fun: Fun = cmp.functions[name]
+
+    for arg in reversed(self.args):
+        arg.compile(cmp)
+        cmp.pushl(EAX)
+
+    cmp.call(name)
+    if fun.arg_space > 0:
+        cmp.addl(S(fun.arg_space), ESP)
 
 
 @monkeypatch(AssignExp)
 def compile(self: AssignExp, cmp: Compiler):
     self.exp.compile(cmp)
-    cmp.movl(EAX, cmp.var(self.var))
-
-
-@monkeypatch(CallExp)
-def compile(self: CallExp, cmp: Compiler):
-    for arg in reversed(self.args):
-        arg.compile(cmp)
-        cmp.pushl(EAX)
-    cmp.call(self.callee)
-    if len(self.args) > 0:
-        cmp.addl(S(4 * len(self.args)), ESP)
+    cmp.movl(EAX, self.var.resolved_as.as_reg())
 
 
 # --- Statements --- #
 
 
 @monkeypatch(ExpStmt)
-def compile(self, cmp: Compiler):
+def compile(self: ExpStmt, cmp: Compiler):
     self.exp.compile(cmp)
 
 
-@monkeypatch(VarStmt)
-def compile(self: VarStmt, cmp: Compiler):
-    fun = cmp.cur_fun
-    for name, exp in self.vars:
-        if exp is not None:
-            exp.compile(cmp)
-            cmp.movl(EAX, cmp.var(name))
-
-
 @monkeypatch(ReturnStmt)
-def compile(self: ReturnStmt, cmp: Compiler):
+def compile(self: ExpStmt, cmp: Compiler):
     if self.exp is not None:
         self.exp.compile(cmp)
-    else:
-        cmp.movl(S(0), EAX)
     cmp.emit_return()
 
 
 @monkeypatch(PrintfStmt)
 @monkeypatch(ScanfStmt)
-def compile(self: ScanfStmt, cmp: Compiler):
-    CallExp(
-        callee="scanf" if isinstance(self, ScanfStmt) else "printf",
-        args=[self.fmt, *self.args],
-    ).compile(cmp)
+def compile(self: PrintfStmt, cmp: Compiler):
+    for arg in reversed(self.args):
+        arg.compile(cmp)
+        cmp.pushl(EAX)
+    StrExp(self.fmt).compile(cmp)
+    cmp.call("printf" if isinstance(self, PrintfStmt) else "scanf")
+    cmp.addl(S(self.stack_size), ESP)
 
 
 # --- Top Level --- #
@@ -232,43 +280,37 @@ def compile(self: ScanfStmt, cmp: Compiler):
 
 @monkeypatch(FunDeclTop)
 def compile(self: FunDeclTop, cmp: Compiler):
-    pass
+    ...
 
 
 @monkeypatch(FunDefTop)
 def compile(self: FunDefTop, cmp: Compiler):
     name = self.head.name
+    fun: Fun = cmp.functions[name]
+    bytes_locals = fun.max_stack_size
 
     cmp.add_line(".text")
     cmp.add_line(f".globl {name}")
     cmp.add_line(f".type {name}, @function")
     cmp.label(name)
 
-    fun: Fun = cmp.globals_[name]
-    cmp.cur_fun = fun
-
     cmp.pushl(EBP)
     cmp.movl(ESP, EBP)
-    if cmp.cur_fun.locals_:
-        # si hay locales, hacer espacio
-        cmp.subl(S(len(fun.locals_) * 4), ESP)
+    if bytes_locals != 0:
+        cmp.addl(S(bytes_locals), ESP)
     cmp.nl()
 
     for stmt in self.body:
-        for line in str(stmt).split("\n"):
-            cmp.add_line("; " + line)
         stmt.compile(cmp)
         cmp.nl()
 
-    # TODO devuelve 0 por defecto por ahora
-
-    if cmp.cur_fun.typ.ret == TypeInt:
-        cmp.movl(S(0), EAX)
+    if self.head.sig.ret != TypeVoid:
+        cmp.movl(S(0), EAX)  # TODO: para cuando no seamos "monotipo"
     cmp.emit_return()
     cmp.nl()
 
 
 @monkeypatch(Program)
 def compile(self: Program, cmp: Compiler):
-    for topdecl in self.topdecls:
-        topdecl.compile(cmp)
+    for topstmt in self.topdecls:
+        topstmt.compile(cmp)

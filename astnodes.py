@@ -34,6 +34,8 @@ class Global(TopObject):
 class Fun(TopObject):
     name: str = ""
     params: list[str] = field(default_factory=list)
+    max_stack_size: int = 0
+    arg_space: int = 0
 
 
 # --- Nodos --- #
@@ -49,7 +51,7 @@ class Node:
 @dataclass
 class VarExp(Node):
     lit: str
-    resolved_as: Local
+    resolved_as: Local = None
 
     def __str__(self):
         return self.lit
@@ -58,7 +60,6 @@ class VarExp(Node):
 @dataclass
 class StrExp(Node):
     lit: str
-    resolved_as: int
 
     def __str__(self):
         return f'"{self.lit}"'
@@ -112,7 +113,7 @@ class CallExp(Node):
 
 @dataclass
 class AssignExp(Node):
-    var: str
+    var: Node
     exp: Node
 
     def __str__(self):
@@ -157,6 +158,7 @@ class ReturnStmt(Node):
 class PrintfStmt(Node):
     fmt: str
     args: list[Node]
+    stack_size: int = 0
 
     def __str__(self):
         args = ", ".join(map(str, self.args))
@@ -167,6 +169,7 @@ class PrintfStmt(Node):
 class ScanfStmt(Node):
     fmt: str
     args: list[Node]
+    stack_size: int = 0
 
     def __str__(self):
         args = ", ".join(map(str, self.args))

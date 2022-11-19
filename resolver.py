@@ -50,6 +50,7 @@ class Resolver:
         if self.cur_fun is None:
             raise Exception("no se puede usar 'add_local' en contexto global")
         self.scope.add_local(name, typ)
+        self.cur_fun.max_size = max(self.scope.top, self.cur_fun.max_size)
 
     def add_string(self, string: str) -> int:
         self.strings.append(string)
@@ -57,7 +58,8 @@ class Resolver:
 
     def find_var(self, name: str) -> Union[Local, Global, None]:
         return (
-            self.scope is not None and self.scope.find(name)
+            self.scope is not None
+            and self.scope.find(name)
             # or self.globals.get(name, None)
             or None
         )
@@ -94,10 +96,15 @@ def resolve(self, _):
     return TypeInt
 
 
+@monkeypatch(StrExp)
+def resolve(self, _):
+    return TypePtr(TypeChar)
+
+
 @monkeypatch(VarExp)
 def resolve(self: VarExp, res: Resolver):
     var = res.find_var(self.lit)
-    if var is None: # = no declarada aún
+    if var is None:  # = no declarada aún
         raise ResolverError(f"variable '{self.lit}' no declarada")
 
     if not var.initialized:
@@ -144,16 +151,17 @@ def resolve(self: CallExp, res: Resolver):
 
 @monkeypatch(AssignExp)
 def resolve(self: AssignExp, res: Resolver):
-    var = res.find_var(self.var)
-    if var is None:
-        raise ResolverError(f"variable '{self.var}' no declarada")
+    var = res.find_var(self.var.lit)
+    if var is None:  # = no declarada aún
+        raise ResolverError(f"variable '{self.lit}' no declarada")
+    self.var.resolved_as = var
 
     t = self.exp.resolve(res)
     if var.typ != t:
         raise ResolverError(
-            f"variable '{self.var}' es de tipo {tvar}, pero se está asignando una expresión de tipo {var.typ}"
+            f"variable '{self.var.lit}' es de tipo {tvar}, pero se está asignando una expresión de tipo {var.typ}"
         )
-    res.init(self.var)
+    var.initialized = True
 
     return var.typ
 
@@ -181,7 +189,9 @@ def resolve(self, res: Resolver):
             )
 
     elif tret != TypeVoid:
-        raise ResolverError("se intenta retornar de una función no void sin una expresión")
+        raise ResolverError(
+            "se intenta retornar de una función no void sin una expresión"
+        )
 
 
 @monkeypatch(VarStmt)
@@ -197,7 +207,9 @@ def resolve(self: VarStmt, res: Resolver):
         if exp is not None:
             texp = exp.resolve(res)
             if texp != tvar:
-                raise ResolverError(f"se pretende asignar a variable '{name}' con expresión de tipo {texp}, se espera tipo {tvar}")
+                raise ResolverError(
+                    f"se pretende asignar a variable '{name}' con expresión de tipo {texp}, se espera tipo {tvar}"
+                )
             res.init(name)
 
 
@@ -209,31 +221,40 @@ def resolve(self, res: Resolver):
             f"printf no tiene la misma cantidad de argumentos que de signos de formato"
         )
 
+    targs = []
     for arg in self.args:
         t = arg.resolve(res)
+        targs.append(t)
+
         if t != TypeInt:
             raise ResolverError(
                 f"no se pueden pasar valores no enteros a printf después del formato"
             )
 
+    tstr = StrExp(self.fmt).resolve(res)
+    self.stack_size = sum(t.sizeof() for t in targs) + tstr.sizeof()
+
 
 @monkeypatch(ScanfStmt)
-def resolve(self, res: Resolver):
+def resolve(self: ScanfStmt, res: Resolver):
     if self.fmt.count("%i") != len(self.args):
         raise ResolverError(
             f"printf no tiene la misma cantidad de argumentos que de signos de formato"
         )
 
-    StrExp(self.fmt).resolve(res)
-
+    targs = []
     intptr = TypePtr(TypeInt)
     for arg in self.args:
         t = arg.resolve(res)
+        targs.append(t)
 
         if t != intptr:
             raise ResolverError(
                 f"no se pueden pasar valores no punteros de enteros a scanf después del formato"
             )
+
+    tstr = StrExp(self.fmt).resolve(res)
+    self.stack_size = sum(t.sizeof() for t in targs) + tstr.sizeof()
 
 
 # --- Top Level --- #
@@ -248,6 +269,7 @@ def resolve(self: FunDeclTop, res: Resolver):
         name=self.name,
         typ=self.sig,
         params=self.params,
+        arg_space=sum(arg.sizeof() for arg in self.sig.params),
     )
 
 
@@ -278,7 +300,8 @@ def resolve(self: FunDefTop, res: Resolver):
         self.head.resolve(res)
 
     res.cur_fun = res.functions[name]
-    fun: Function = res.cur_fun
+    fun: Fun = res.cur_fun
+    fun.initialized = True
 
     vars = {}
 
@@ -287,9 +310,9 @@ def resolve(self: FunDefTop, res: Resolver):
         vars[param] = Local(
             initialized=True,
             typ=typ,
-            addr=8+i*4,
+            addr=8 + i * 4,
         )
-    res.scope = Scope(variables = vars)
+    res.scope = Scope(variables=vars)
 
     for stmt in self.body:
         stmt.resolve(res)
