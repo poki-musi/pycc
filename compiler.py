@@ -11,7 +11,7 @@ class Reg:
 
     def __add__(self, o):
         if o == 0:
-            return self.name
+            return f"(%{self.name})"
         else:
             return f"{o}(%{self.name})"
 
@@ -21,6 +21,9 @@ class Reg:
     def __str__(self):
         return self.name
 
+    def deref(self):
+        return f"(%{self.name})"
+
 
 EAX = Reg("eax")
 EBX = Reg("ebx")
@@ -29,12 +32,12 @@ ESP = Reg("esp")
 
 
 @monkeypatch(Local)
-def as_reg(self: Local) -> str:
-    return EBP + self.addr
+def reg(self: Local) -> str:
+    return EBP - self.addr
 
 
 @monkeypatch(Global)
-def as_reg(self: Global) -> str:
+def reg(self: Global) -> str:
     return self.name
 
 
@@ -154,23 +157,27 @@ def compile(self: StrExp, cmp: Compiler):
 
 @monkeypatch(VarExp)
 def compile(self: VarExp, cmp: Compiler):
-    cmp.movl(self.resolved_as.as_reg(), EAX)
+    cmp.movl(self.resolved_as.reg(), EAX)
 
 
 @monkeypatch(UnaryExp)
 def compile(self: UnaryExp, cmp: Compiler):
-    self.exp.compile(cmp)
+    if self.op == "&":
+        if isinstance(self.exp, VarExp):
+            cmp.leal(self.exp.resolved_as.reg(), EAX)
+    else:
+        self.exp.compile(cmp)
 
-    if self.op == "-":
-        cmp.neg(EAX)
-    elif self.op == "&":
-        cmp.leal(EAX)
-    elif self.op == "!":
-        label = cmp.make_label(".J")
-        cmp.cmpl(S(0), EAX)
-        cmp.je(label)
-        cmp.movl(S(0), EAX)
-        cmp.label(label)
+        if self.op == "-":
+            cmp.neg(EAX)
+        elif self.op == "*":
+            cmp.movl(EAX.deref(), EAX)
+        elif self.op == "!":
+            label = cmp.make_label(".J")
+            cmp.cmpl(S(0), EAX)
+            cmp.jne(label)
+            cmp.movl(S(0), EAX)
+            cmp.label(label)
 
 
 JUMP_TYPES = {
@@ -195,50 +202,51 @@ def compile(self: BinaryExp, cmp: Compiler):
             cmp.jne(j)
         self.exp2.compile(cmp)
         cmp.label(j)
+        return
 
+    self.exp1.compile(cmp)
+    cmp.pushl(EAX)
+
+    self.exp2.compile(cmp)
+    cmp.movl(EAX, EBX)
+    cmp.popl(EAX)
+
+    if self.op == "+":
+        cmp.addl(EBX, EAX)
+    elif self.op == "-":
+        cmp.subl(EBX, EAX)
+    elif self.op == "*":
+        cmp.imull(EBX, EAX)
+    elif self.op == "/":
+        cmp.cdq()
+        cmp.idivl(EBX)
     else:
-        self.exp1.compile(cmp)
-        cmp.pushl(EAX)
+        # remaining cases: <, >, <=, >=, ==, !=
+        cond_jump = getattr(cmp, JUMP_TYPES[self.op])
 
-        self.exp2.compile(cmp)
-        cmp.movl(EAX, EBX)
-        cmp.popl(EAX)
+        no = cmp.make_label(".J")
+        fin = cmp.make_label(".J")
+        cmp.cmpl(EBX, EAX)
+        cond_jump(no)
+        cmp.movl(S(1), EAX)
+        cmp.j(fin)
 
-        if self.op == "+":
-            cmp.addl(EBX, EAX)
-        elif self.op == "-":
-            cmp.subl(EBX, EAX)
-        elif self.op == "*":
-            cmp.imull(EBX, EAX)
-        elif self.op == "/":
-            cmp.cdq()
-            cmp.idivl(EBX)
-        else:
-            # remaining cases: <, >, <=, >=, ==, !=
-            cond_jump = getattr(cmp, JUMP_TYPES[self.op])
-
-            no = cmp.make_label(".J")
-            fin = cmp.make_label(".J")
-            cmp.cmpl(EAX, EBX)
-            cond_jump(no)
-            cmp.movl(S(1), EAX)
-            cmp.j(fin)
-
-            cmp.label(no)
-            cmp.movl(S(0), EAX)
-            cmp.label(fin)
+        cmp.label(no)
+        cmp.movl(S(0), EAX)
+        cmp.label(fin)
 
 
 @monkeypatch(CallExp)
 def compile(self: CallExp, cmp: Compiler):
+    # TODO: se asume que callee es un VarExp
     name = self.callee
-    fun: Fun = cmp.functions[name]
+    fun: Fun = cmp.functions[name.lit]
 
     for arg in reversed(self.args):
         arg.compile(cmp)
         cmp.pushl(EAX)
 
-    cmp.call(name)
+    cmp.call(name.lit)
     if fun.arg_space > 0:
         cmp.addl(S(fun.arg_space), ESP)
 
@@ -246,7 +254,7 @@ def compile(self: CallExp, cmp: Compiler):
 @monkeypatch(AssignExp)
 def compile(self: AssignExp, cmp: Compiler):
     self.exp.compile(cmp)
-    cmp.movl(EAX, self.var.resolved_as.as_reg())
+    cmp.movl(EAX, self.var.resolved_as.reg())
 
 
 # --- Statements --- #
@@ -255,6 +263,17 @@ def compile(self: AssignExp, cmp: Compiler):
 @monkeypatch(ExpStmt)
 def compile(self: ExpStmt, cmp: Compiler):
     self.exp.compile(cmp)
+
+
+@monkeypatch(VarStmt)
+def compile(self: VarStmt, cmp: Compiler):
+    for typ, name, exp in self.vars:
+        if typ != TypeInt:
+            continue  # TODO compilar variables no triviales
+
+        if exp is not None:
+            exp.compile(cmp)
+            cmp.movl(EAX, name.resolved_as.reg())
 
 
 @monkeypatch(ReturnStmt)
@@ -302,8 +321,8 @@ def compile(self: FunDefTop, cmp: Compiler):
 
     for stmt in self.body:
         stmt.compile(cmp)
-        cmp.nl()
 
+    cmp.nl()
     if self.head.sig.ret != TypeVoid:
         cmp.movl(S(0), EAX)  # TODO: para cuando no seamos "monotipo"
     cmp.emit_return()

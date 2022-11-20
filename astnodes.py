@@ -53,33 +53,21 @@ class VarExp(Node):
     lit: str
     resolved_as: Local = None
 
-    def __str__(self):
-        return self.lit
-
 
 @dataclass
 class StrExp(Node):
     lit: str
-
-    def __str__(self):
-        return f'"{self.lit}"'
 
 
 @dataclass
 class NumExp(Node):
     lit: int
 
-    def __str__(self):
-        return str(self.lit)
-
 
 @dataclass
 class UnaryExp(Node):
     op: str  # = !, -, &, *
     exp: Node
-
-    def __str__(self):
-        return f"{self.op} ({self.exp})"
 
 
 @dataclass
@@ -88,17 +76,11 @@ class BinaryExp(Node):
     op: str  # = ||, &&, +, -, *, /
     exp2: Node
 
-    def __str__(self):
-        return f"({self.exp1}) {self.op} ({self.exp2})"
-
 
 @dataclass
 class ArrayPosExp(Node):
     exp: Node
-    offset: int
-
-    def __str__(self):
-        return f"{self.exp}[{self.offset}]"
+    offset: Node
 
 
 @dataclass
@@ -106,18 +88,11 @@ class CallExp(Node):
     callee: str
     args: list[Node]
 
-    def __str__(self):
-        args = ", ".join(map(str, self.args))
-        return f"{self.callee}({args})"
-
 
 @dataclass
 class AssignExp(Node):
     var: Node
     exp: Node
-
-    def __str__(self):
-        return f"{self.var} = {self.exp}"
 
 
 # Declaraciones
@@ -125,33 +100,17 @@ class AssignExp(Node):
 
 @dataclass
 class VarStmt(Node):
-    base_type: Type
-    vars: list[Tuple[Type, str, Union[Node, None]]]
-
-    def __str__(self):
-        vars = ", ".join(
-            (var if exp is None else f"{var} = {exp}" for var, exp in self.vars)
-        )
-        return f"{self.var_type} {vars};"
+    vars: list[Tuple[Type, VarExp, Union[Node, None]]]
 
 
 @dataclass
 class ExpStmt(Node):
     exp: Node
 
-    def __str__(self):
-        return f"{self.exp};"
-
 
 @dataclass
 class ReturnStmt(Node):
     exp: Union[Node, None]
-
-    def __str__(self):
-        if self.exp is None:
-            return "return;"
-        else:
-            return f"return {self.exp};"
 
 
 @dataclass
@@ -160,20 +119,12 @@ class PrintfStmt(Node):
     args: list[Node]
     stack_size: int = 0
 
-    def __str__(self):
-        args = ", ".join(map(str, self.args))
-        return f"printf({self.fmt}, {args})"
-
 
 @dataclass
 class ScanfStmt(Node):
     fmt: str
     args: list[Node]
     stack_size: int = 0
-
-    def __str__(self):
-        args = ", ".join(map(str, self.args))
-        return f"scanf({self.fmt}, {args})"
 
 
 # Toplevel

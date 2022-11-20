@@ -96,14 +96,22 @@ class CParser(Parser):
     def fun_decl(self, p):
         return p[0]
 
-    @_('type ID "(" fun_args ")"')
+    @_('type funptr ID "(" fun_args ")"')
     def fun(self, p):
-        types, params = p[3]
-        return FunDeclTop(
-            name = p[1],
-            sig=TypeFun(types, p[0]),
-            params = params
-        )
+        types, params = p[4]
+        tret = p[0]
+        for _ in range(p[1]):
+            tret = TypePtr(inner=tret)
+
+        return FunDeclTop(name=p[2], sig=TypeFun(params=types, ret=tret), params=params)
+
+    @_(r'funptr "*"')
+    def funptr(self, p):
+        return p[0] + 1
+
+    @_(r'')
+    def funptr(self, _):
+        return 0
 
     @_("fun_args_")
     def fun_args(self, p):
@@ -113,16 +121,18 @@ class CParser(Parser):
     def fun_args(self, p):
         return ([], [])
 
-    @_('fun_args_ "," type ID')
+    @_('fun_args_ "," type lvar')
     def fun_args_(self, p):
         params = p[0]
-        params.append(p[2])
-        params.append(p[3])
+        name, typf = p[3]
+        params[0].append(typf(p[2]))
+        params[1].append(name.lit)
         return params
 
-    @_("type ID")
+    @_("type lvar")
     def fun_args_(self, p):
-        return ([p[0]], [p[1]])
+        name, typf = p[1]
+        return ([typf(p[0])], [name.lit])
 
     # --- Statements --- #
 
@@ -149,27 +159,6 @@ class CParser(Parser):
     def exp_stmt(self, p):
         return ExpStmt(p[0])
 
-    @_(r'type var_decl_ ";"')
-    def var_decl(self, p):
-        return VarStmt(p[0], p[1])
-
-    @_(r'var_decl_ "," ID var_decl_exp')
-    def var_decl_(self, p):
-        p[0].append((p[2], p[3]))
-        return p[0]
-
-    @_(r"ID var_decl_exp")
-    def var_decl_(self, p):
-        return [(p[0], p[1])]
-
-    @_(r'"=" assign')
-    def var_decl_exp(self, p):
-        return p[1]
-
-    @_(r"")
-    def var_decl_exp(self, p):
-        return None
-
     @_('KW_PRINTF "(" STR printf_args ")" ";"')
     def printf_stmt(self, p):
         return PrintfStmt(p[2], p[3])
@@ -195,7 +184,7 @@ class CParser(Parser):
     def scanf_stmt(self, p):
         return ScanfStmt(p[2], p[3])
 
-    @_('scanf_args "," address')
+    @_('scanf_args "," exp')
     def scanf_args(self, p):
         p[0].append(p[2])  # list of arguments
         return p[0]
@@ -204,19 +193,65 @@ class CParser(Parser):
     def scanf_args(self, p):
         return []
 
-    @_('"&" ID')
-    def address(self, p):
+    # --- Decl. Variables --- #
+
+    @_(r'type var_decl_ ";"')
+    def var_decl(self, p):
+        vars, _ = p[1]
+        return VarStmt(vars)
+
+    @_(r'var_decl_ "," param_decl')
+    def var_decl_(self, p):
+        typf, name, exp = p[2]
+        vars, typ = p[0]
+        vars.append((typf(typ), name, exp))
+        return vars, typ
+
+    @_(r"param_decl")
+    def var_decl_(self, p):
+        typ = p[-2]
+        typf, name, exp = p[0]
+        return [(typf(typ), name, exp)], typ
+
+    @_(r"lvar var_decl_exp")
+    def param_decl(self, p):
+        name, typf = p[0]
+        return typf, name, p[1]
+
+    @_(r'"=" exp')
+    def var_decl_exp(self, p):
         return p[1]
 
-    # --- Tipos --- #
+    @_(r"")
+    def var_decl_exp(self, p):
+        return None
 
-    @_(r"KW_INT")
-    def type(self, p):
-        return TypeInt
+    @_(r'lvar "[" NUM "]"')
+    def lvar(self, p):
+        name, typf = p[0]
+        size = p[2]
+        return name, lambda typ: TypeArray(inner=typf(typ), size=size)
 
-    @_(r"KW_VOID")
-    def type(self, p):
-        return TypeVoid
+    @_(r"lvar_ptr")
+    def lvar(self, p):
+        return p[0]
+
+    @_(r'"*" lvar_ptr')
+    def lvar_ptr(self, p):
+        name, typf = p[1]
+        return name, lambda typ: TypePtr(inner=typf(typ))
+
+    @_(r"lvar_atom")
+    def lvar_ptr(self, p):
+        return p[0]
+
+    @_(r"ID")
+    def lvar_atom(self, p):
+        return VarExp(p[0]), lambda typ: typ
+
+    @_(r'"(" lvar ")"')
+    def lvar_atom(self, p):
+        return p[1]
 
     # --- Expresiones --- #
 
@@ -224,11 +259,11 @@ class CParser(Parser):
     def exp(self, p):
         return p[0]
 
-    # ASSIGN
+    # Asignaciones
 
-    @_('ID "=" assign')
+    @_('unary "=" assign')
     def assign(self, p):
-        return AssignExp(VarExp(p[0]), p[2])
+        return AssignExp(p[0], p[2])
 
     @_("or_exp")
     def assign(self, p):
@@ -308,7 +343,7 @@ class CParser(Parser):
 
     # CALL
 
-    @_(r'ID "(" call_args ")"')
+    @_(r'call "(" call_args ")"')
     def call(self, p):
         return CallExp(p[0], p[2])
 
@@ -329,6 +364,10 @@ class CParser(Parser):
     def call_args_(self, p):
         return [p[0]]
 
+    @_(r'call "[" exp "]"')
+    def call(self, p):
+        return UnaryExp(op="*", exp=BinaryExp(exp1=p[0], op="+", exp2=p[2]))
+
     @_(r"atom")
     def call(self, p):
         return p[0]
@@ -346,3 +385,13 @@ class CParser(Parser):
     @_("NUM")
     def atom(self, p):
         return NumExp(p[0])
+
+    # --- Tipos --- #
+
+    @_(r"KW_INT")
+    def type(self, p):
+        return TypeInt
+
+    @_(r"KW_VOID")
+    def type(self, p):
+        return TypeVoid

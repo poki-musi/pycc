@@ -32,7 +32,7 @@ class Scope:
 class Resolver:
     functions: dict[str, Fun] = field(default_factory=dict)
     strings: list[str] = field(default_factory=list)
-    cur_fun: Global = None
+    cur_fun: Fun = None
     scope: Scope = None
     # globals_: dict[str, Global] = field(default_factory=dict)
 
@@ -49,8 +49,9 @@ class Resolver:
     def add_local(self, name: str, typ: Type) -> None:
         if self.cur_fun is None:
             raise Exception("no se puede usar 'add_local' en contexto global")
-        self.scope.add_local(name, typ)
-        self.cur_fun.max_size = max(self.scope.top, self.cur_fun.max_size)
+        local = self.scope.add_local(name, typ)
+        self.cur_fun.max_stack_size = max(self.scope.top, self.cur_fun.max_stack_size)
+        return local
 
     def add_string(self, string: str) -> int:
         self.strings.append(string)
@@ -119,24 +120,37 @@ def resolve(self: UnaryExp, res: Resolver):
     t = self.exp.resolve(res)
 
     if self.op == "&":
-        return TypePtr(t)
+        if t.is_rvalue():
+            raise ResolverError(f"se está tomando referencia de un r-valor")
+        return TypePtr(lvalue=False, inner=t)
+
+    if self.op == "*":
+        if not (isinstance(t, TypePtr) or isinstance(t, TypeArray)):
+            raise ResolverError(
+                f"se está dereferenciando un valor que no es puntero o vector"
+            )
+        tp = t.inner.dup()
+        tp.lvalue = True
+        return tp
 
     return t
 
 
 @monkeypatch(BinaryExp)
 def resolve(self: BinaryExp, res: Resolver):
-    _t1 = self.exp1.resolve(res)
-    _t2 = self.exp2.resolve(res)
-    return TypeInt
+    t1 = self.exp1.resolve(res)
+    t2 = self.exp2.resolve(res)
+    return t1
 
 
 @monkeypatch(CallExp)
 def resolve(self: CallExp, res: Resolver):
-    fun: Fun = res.functions.get(self.callee, None)
+    # TODO: se asume que callee es un VarExp
+    fun: Fun = res.functions.get(self.callee.lit, None)
 
     if fun is None:
-        raise ResolverError(f"función '{self.lit}' no declarada")
+        # TODO: se asume que callee es un VarExp
+        raise ResolverError(f"función '{self.callee.lit}' no declarada")
 
     for tparam, arg in zip(fun.typ.params, self.args):
         targ: Type = arg.resolve(res)
@@ -151,9 +165,10 @@ def resolve(self: CallExp, res: Resolver):
 
 @monkeypatch(AssignExp)
 def resolve(self: AssignExp, res: Resolver):
+    # TODO: se asume que var es un VarExp
     var = res.find_var(self.var.lit)
     if var is None:  # = no declarada aún
-        raise ResolverError(f"variable '{self.lit}' no declarada")
+        raise ResolverError(f"variable '{self.var.lit}' no declarada")
     self.var.resolved_as = var
 
     t = self.exp.resolve(res)
@@ -196,21 +211,24 @@ def resolve(self, res: Resolver):
 
 @monkeypatch(VarStmt)
 def resolve(self: VarStmt, res: Resolver):
-    tbase = self.base_type
-    for name, exp in self.vars:
-        if res.is_declared_in_scope(name):
-            raise ResolverError(f"variable '{name}' ya declarada en scope actual")
+    for typ, name, exp in self.vars:
+        if typ == TypeVoid:
+            raise ResolverError(f"no pueden existir variables tipo void")
 
-        tvar = tbase
+        if res.is_declared_in_scope(name.lit):
+            raise ResolverError(f"variable '{name.lit}' ya declarada en scope actual")
 
-        res.add_local(name, tvar)
+        name.resolved_as = res.add_local(name.lit, typ)
         if exp is not None:
             texp = exp.resolve(res)
-            if texp != tvar:
+            if texp != typ:
                 raise ResolverError(
-                    f"se pretende asignar a variable '{name}' con expresión de tipo {texp}, se espera tipo {tvar}"
+                    f"se pretende asignar a variable '{var.lit}' con expresión de tipo {texp}, se espera tipo {tvar}"
                 )
-            res.init(name)
+            name.resolved_as.initialized = True
+
+        if isinstance(typ, TypeArray) or isinstance(typ, TypePtr):
+            name.resolved_as.initialized = True
 
 
 @monkeypatch(PrintfStmt)
@@ -243,7 +261,7 @@ def resolve(self: ScanfStmt, res: Resolver):
         )
 
     targs = []
-    intptr = TypePtr(TypeInt)
+    intptr = TypePtr(inner=TypeInt)
     for arg in self.args:
         t = arg.resolve(res)
         targs.append(t)
@@ -307,10 +325,12 @@ def resolve(self: FunDefTop, res: Resolver):
 
     for i, param in enumerate(zip(fun.typ.params, fun.params)):
         typ, param = param
+        if param in vars:
+            raise ResolverError(f"parámetro '{param}' ya declarado")
         vars[param] = Local(
             initialized=True,
             typ=typ,
-            addr=8 + i * 4,
+            addr=-(8 + i * 4),
         )
     res.scope = Scope(variables=vars)
 
@@ -325,3 +345,6 @@ def resolve(self: FunDefTop, res: Resolver):
 def resolve(self: Program, res: Resolver):
     for topdecl in self.topdecls:
         topdecl.resolve(res)
+
+    if "main" not in res.functions:
+        raise ResolverError("función 'main' no presente")

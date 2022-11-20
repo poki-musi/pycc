@@ -3,5 +3,7 @@ int fib(int n) {
 }
 
 int main() {
-  printf("%i\n", fib(10));
+  int n = 0;
+  scanf("%i\n", &n);
+  printf("%i\n", fib(n));
 }
