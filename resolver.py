@@ -34,13 +34,6 @@ class Resolver:
     strings: list[str] = field(default_factory=list)
     cur_fun: Fun = None
     scope: Scope = None
-    # globals_: dict[str, Global] = field(default_factory=dict)
-
-    # def add_global(self, name: str, typ: Type):
-    #     if name not in self.globals_:
-    #         self.globals_[name] = Global(typ=typ, name=name)
-    #     else:
-    #         raise ResolverError(f"global '{name}' ya declarada")
 
     def resolve(self, ast: Node) -> Type:
         ast.resolve(self)
@@ -53,22 +46,12 @@ class Resolver:
         self.cur_fun.max_stack_size = max(self.scope.top, self.cur_fun.max_stack_size)
         return local
 
-    def add_string(self, string: str) -> int:
-        self.strings.append(string)
-        return len(self.strings)
-
     def find_var(self, name: str) -> Union[Local, Global, None]:
         return (
             self.scope is not None
             and self.scope.find(name)
-            # or self.globals.get(name, None)
             or None
         )
-
-    def init(self, name: str) -> None:
-        var = self.find_var(name)
-        if var is not None:
-            var.initialized = True
 
     def is_declared(self, name: str) -> bool:
         return self.find_var(name) is not None
@@ -80,9 +63,14 @@ class Resolver:
         else:
             return name in self.scope.variables
 
-    def is_initialized(self, name: str) -> bool:
-        var = self.find_var(name)
-        return var is not None and var.initialized
+    def open_scope(self):
+        new_scope = Scope(top=self.scope.top)
+        new_scope.prev, self.scope = self.scope, new_scope
+        return self.scope
+
+    def close_scope(self):
+        self.scope = self.scope.prev
+        return self.scope
 
 
 class ResolverError(Exception):
@@ -99,19 +87,28 @@ def resolve(self, _):
 
 @monkeypatch(StrExp)
 def resolve(self, _):
-    return TypePtr(TypeChar)
+    return TypePtr(lvalue=False, inner=TypeChar)
+
+
+@monkeypatch(ArrayExp)
+def resolve(self: ArrayExp, res: Resolver):
+    texps = [exp.resolve(res) for exp in self.exps]
+
+    if not all(a==b for a,b in zip(texps, texps[1:])):
+        raise ResolverError("elementos del vector literal no tienen los mismos tipos")
+
+    return TypeArray(inner=texps[0], size=len(texps))
 
 
 @monkeypatch(VarExp)
 def resolve(self: VarExp, res: Resolver):
     var = res.find_var(self.lit)
+
     if var is None:  # = no declarada aún
         raise ResolverError(f"variable '{self.lit}' no declarada")
 
-    if not var.initialized:
-        raise ResolverError(f"variable '{self.lit}' no initializada")
-
     self.resolved_as = var
+    var.typ.lvalue = True
     return var.typ
 
 
@@ -129,27 +126,62 @@ def resolve(self: UnaryExp, res: Resolver):
             raise ResolverError(
                 f"se está dereferenciando un valor que no es puntero o vector"
             )
-        tp = t.inner.dup()
-        tp.lvalue = True
-        return tp
+        return t.inner.dup(is_lvalue=True)
 
-    return t
+    if self.op in {"-", "!"}:
+        if t != TypeInt:
+            raise ResolverError(
+                f"se espera int para el operador {self.op}, pero se encontró {t}"
+            )
+        return t.dup(is_lvalue=False)
 
 
 @monkeypatch(BinaryExp)
 def resolve(self: BinaryExp, res: Resolver):
     t1 = self.exp1.resolve(res)
     t2 = self.exp2.resolve(res)
-    return t1
+
+    if self.op in {"*", "/", "||", "&&"}:
+        if t1 != TypeInt or t2 != TypeInt:
+            raise ResolverError(
+                f"se esperan tipos enteros para el operador {self.op}, pero se obtuvo {t1} y {t2}"
+            )
+        return t1.dup(is_lvalue=False)
+
+    if self.op in {"==", "!=", "<=", ">=", "<", ">"}:
+        if t1 != t2:
+            raise ResolverError(f"no se pueden comparar tipos {t1} y {t2}")
+        return TypeInt
+
+    if self.op in {"+", "-"}:
+        is_ptr_incr = t1.is_ptr() and t2 == TypeInt or t2.is_ptr() and t1 == TypeInt
+        is_num_add = t1 == TypeInt and t2 == TypeInt
+
+        if not (is_ptr_incr or is_num_add):
+            raise ResolverError(
+                f"se espera puntero y entero o enteros para operador {self.op}, pero se recibió {t1} y {t2}"
+            )
+
+        if is_ptr_incr:
+            if t1.is_ptr():
+                t = t1
+                self.exp2 = BinaryExp(exp1=self.exp2, exp2=NumExp(t.inner.sizeof()), op="*")
+            else:
+                t = t2
+                self.exp1 = BinaryExp(exp1=self.exp2, exp2=NumExp(t.inner.sizeof()), op="*")
+
+            return TypePtr(lvalue=False, inner=t1.is_ptr() and t1.inner or t2.inner)
+        else:
+            return TypeInt.dup(is_lvalue=False)
 
 
 @monkeypatch(CallExp)
 def resolve(self: CallExp, res: Resolver):
-    # TODO: se asume que callee es un VarExp
-    fun: Fun = res.functions.get(self.callee.lit, None)
+    if res.find_var(self.callee) is not None:
+        raise ResolverError(f"función llamada '{self.callee}' es una variable, no una función")
 
+    fun: Fun = res.functions.get(self.callee, None)
     if fun is None:
-        # TODO: se asume que callee es un VarExp
         raise ResolverError(f"función '{self.callee.lit}' no declarada")
 
     for tparam, arg in zip(fun.typ.params, self.args):
@@ -160,25 +192,28 @@ def resolve(self: CallExp, res: Resolver):
                 f"función tomó argumento de tipo {targ}, pero se necesita tipo {tparam}"
             )
 
-    return fun.typ.ret
+    tret = fun.typ.ret.dup()
+    tret.lvalue = False
+    return tret
 
 
 @monkeypatch(AssignExp)
 def resolve(self: AssignExp, res: Resolver):
-    # TODO: se asume que var es un VarExp
-    var = res.find_var(self.var.lit)
-    if var is None:  # = no declarada aún
-        raise ResolverError(f"variable '{self.var.lit}' no declarada")
-    self.var.resolved_as = var
+    tassign = self.var.resolve(res)
+    tval = self.exp.resolve(res)
 
-    t = self.exp.resolve(res)
-    if var.typ != t:
+    if tassign.is_rvalue():
+        raise ResolverError("valor al que se asigna no es un lvalor")
+
+    if isinstance(tassign, TypeArray):
+        raise ResolverError("valor al que se asigna no puede ser un vector")
+
+    if not tval.coerces_to(tassign):
         raise ResolverError(
-            f"variable '{self.var.lit}' es de tipo {tvar}, pero se está asignando una expresión de tipo {var.typ}"
+            f"valor al que se asigna ({tassign}) no tiene el mismo tipo que la expresión {tval}"
         )
-    var.initialized = True
 
-    return var.typ
+    return tval.dup()
 
 
 # --- Statements --- #
@@ -211,24 +246,36 @@ def resolve(self, res: Resolver):
 
 @monkeypatch(VarStmt)
 def resolve(self: VarStmt, res: Resolver):
-    for typ, name, exp in self.vars:
-        if typ == TypeVoid:
-            raise ResolverError(f"no pueden existir variables tipo void")
+    tbase = self.typ
+    if tbase == TypeVoid:
+        raise ResolverError(f"no pueden existir variables tipo void")
 
-        if res.is_declared_in_scope(name.lit):
-            raise ResolverError(f"variable '{name.lit}' ya declarada en scope actual")
+    for var, idxs, exp in self.vars:
+        name = var.lit
+        if res.is_declared_in_scope(name):
+            raise ResolverError(f"variable '{name}' ya declarada en scope actual")
 
-        name.resolved_as = res.add_local(name.lit, typ)
+        # convertir el tipo base a un actual tipo array
+        typ = tbase.dup()
+        for idx in reversed(idxs):
+            if idx < 1:
+                raise ResolverError(f"variable '{name}' se declaró con un tamaño no estrictamente positivo")
+            typ = TypeArray(inner=typ, size=idx)
+
         if exp is not None:
             texp = exp.resolve(res)
-            if texp != typ:
-                raise ResolverError(
-                    f"se pretende asignar a variable '{var.lit}' con expresión de tipo {texp}, se espera tipo {tvar}"
-                )
-            name.resolved_as.initialized = True
+            if isinstance(typ, TypeArray):
+                if typ != texp:
+                    raise ResolverError(
+                        f"se pretende asignar a variable '{name}' con expresión de tipo {texp}, se espera tipo {typ}"
+                    )
 
-        if isinstance(typ, TypeArray) or isinstance(typ, TypePtr):
-            name.resolved_as.initialized = True
+            elif not texp.coerces_to(typ):
+                raise ResolverError(
+                    f"se pretende asignar a variable '{name}' con expresión de tipo {texp}, se espera tipo {typ}"
+                )
+
+        var.resolved_as = res.add_local(name, typ)
 
 
 @monkeypatch(PrintfStmt)
@@ -274,6 +321,25 @@ def resolve(self: ScanfStmt, res: Resolver):
     tstr = StrExp(self.fmt).resolve(res)
     self.stack_size = sum(t.sizeof() for t in targs) + tstr.sizeof()
 
+@monkeypatch(BlockStmt)
+def resolve(self: BlockStmt, res: Resolver):
+    res.open_scope()
+    for stmt in self.stmts:
+        stmt.resolve(res)
+    res.close_scope()
+
+
+@monkeypatch(IfStmt)
+def resolve(self: IfStmt, res: Resolver):
+    tcond = self.cond.resolve(res)
+    if not tcond.coerces_to(TypeInt):
+        raise ResolverError("la declaración if tiene una condicional que no es entera")
+
+    self.then.resolve(res)
+
+    if self.else_ is not None:
+        self.else_.resolve(res)
+
 
 # --- Top Level --- #
 
@@ -295,25 +361,16 @@ def resolve(self: FunDeclTop, res: Resolver):
 def resolve(self: FunDefTop, res: Resolver):
     name = self.head.name
 
-    if res.is_initialized(name):
-        raise ResolverError(
-            f"{'función' if res.is_fun(name) else 'variable'} '{name}' ya definida"
-        )
-
-    elif res.is_declared(name):
-        # si se ha declarado 'name', pero
-        # no hay ninguna función llamada 'name', entonces
-        # es una variable ya existente
-        fun = res.functions.get(name, None)
-        if fun is None:
-            raise ResolverError(f"variable '{name}' ya existente")
+    fun = res.functions.get(name, None)
+    if fun is not None:
+        if fun.initialized:
+            raise ResolverError(f"función '{name}' ya definida")
 
         fun.params = self.head.params
         if fun.typ != self.head.sig:
             raise ResolverError(
                 f"tipo de la definición de la función '{name}' no es la misma que la de su declaración"
             )
-
     else:
         self.head.resolve(res)
 
@@ -323,15 +380,16 @@ def resolve(self: FunDefTop, res: Resolver):
 
     vars = {}
 
-    for i, param in enumerate(zip(fun.typ.params, fun.params)):
-        typ, param = param
+    off = 8
+    for typ, param in zip(fun.typ.params, fun.params):
         if param in vars:
             raise ResolverError(f"parámetro '{param}' ya declarado")
+
         vars[param] = Local(
-            initialized=True,
             typ=typ,
-            addr=-(8 + i * 4),
+            addr=-off,
         )
+        off += typ.sizeof()
     res.scope = Scope(variables=vars)
 
     for stmt in self.body:
@@ -348,3 +406,6 @@ def resolve(self: Program, res: Resolver):
 
     if "main" not in res.functions:
         raise ResolverError("función 'main' no presente")
+
+    if res.functions["main"].typ != TypeFun(params=[], ret=TypeInt):
+        raise ResolverError("función 'main' debe de devolver un entero y no tener parámetros")

@@ -19,5 +19,5 @@ int main() {
   printf("segunda posicion del vector (2): %i", a[1]);
   a[2] = a[1]*3 -(4-3);
   printf("tercera posicion del vector igual a expresion (5): %i", a[2]);
-  printf("Imprimir puntero de array(error?): %i", a);
+  // printf("Imprimir puntero de array(error?): %i", a);
 }

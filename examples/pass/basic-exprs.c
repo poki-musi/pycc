@@ -2,7 +2,7 @@ int main() {
   printf("PRUEBA DE EXPRESIONES CORRECTAS...\n");
   int temp;
   temp = 3 * 4;
-  int x = 1 + temp * 4 - 5 - -temp; 
+  int x = 1 + temp * 4 - 5 - -temp;
   int y = temp + 2 *(3-2)/2;
   temp = temp - ((temp/(2-1)) + (x*2 -56));
 

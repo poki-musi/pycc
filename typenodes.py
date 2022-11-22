@@ -11,9 +11,15 @@ class Type:
     def is_lvalue(self): return self.lvalue
     def is_rvalue(self): return not self.lvalue
     def sizeof(self) -> int: return 0
+    def is_ptr(self) -> bool: return False
+    def coerces_to(self, o): return self == o
     def __eq__(self, typ) -> bool: return False
-    def dup(self) -> "Type": return copy.copy(self)
     # fmt: on
+
+    def dup(self, is_lvalue=True) -> "Type":
+        d = copy.copy(self)
+        d.lvalue = is_lvalue
+        return d
 
 
 @dataclass
@@ -38,6 +44,12 @@ class TypePtr(Type):
     def sizeof(self) -> int:
         return 4  # ptr size in bytes
 
+    def is_ptr(self) -> bool:
+        return True
+
+    def coerces_to(self, o):
+        return self == o or o == TypeInt
+
     def __str__(self):
         return f"{self.inner}*"
 
@@ -52,6 +64,9 @@ class TypeArray(Type):
 
     def sizeof(self) -> int:
         return self.inner.sizeof() * self.size
+
+    def is_ptr(self) -> bool:
+        return True
 
     def __getitem__(self, addr) -> int:
         return self.inner.sizeof() * addr
@@ -74,9 +89,6 @@ class TypeArray(Type):
 class TypeFun(Type):
     params: list[Type] = None
     ret: Type = None
-
-    def sizeof(self) -> int:
-        return 4  # ptr size in bytes
 
     def __str__(self):
         return f"{self.ret}(*)({', '.join(map(str, self.params))})"

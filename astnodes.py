@@ -16,7 +16,6 @@ def monkeypatch(cls):
 
 @dataclass
 class TopObject:
-    initialized: bool = False
     typ: Type = None
 
 
@@ -32,6 +31,7 @@ class Global(TopObject):
 
 @dataclass
 class Fun(TopObject):
+    initialized: bool = False
     name: str = ""
     params: list[str] = field(default_factory=list)
     max_stack_size: int = 0
@@ -84,6 +84,11 @@ class ArrayPosExp(Node):
 
 
 @dataclass
+class ArrayExp(Node):
+    exps: list[Node]
+
+
+@dataclass
 class CallExp(Node):
     callee: str
     args: list[Node]
@@ -100,7 +105,8 @@ class AssignExp(Node):
 
 @dataclass
 class VarStmt(Node):
-    vars: list[Tuple[Type, VarExp, Union[Node, None]]]
+    typ: Type
+    vars: list[Tuple[VarExp, list[int], Union[Node, None]]]
 
 
 @dataclass
@@ -125,6 +131,16 @@ class ScanfStmt(Node):
     fmt: str
     args: list[Node]
     stack_size: int = 0
+
+@dataclass
+class BlockStmt(Node):
+    stmts: list[Node]
+
+@dataclass
+class IfStmt(Node):
+    cond: Node
+    then: BlockStmt
+    else_: Union[BlockStmt, None]
 
 
 # Toplevel

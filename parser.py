@@ -21,6 +21,8 @@ class CLexer(Lexer):
         KW_PRINTF,
         KW_RETURN,
         KW_SCANF,
+        KW_IF,
+        KW_ELSE,
     }
 
     # fmt: off
@@ -31,6 +33,7 @@ class CLexer(Lexer):
     # fmt: on
 
     ignore = " \t"
+    ignore_comment = "//[^\n]*"
 
     @_(r"\n+")
     def ignore_newline(self, t):
@@ -47,6 +50,8 @@ class CLexer(Lexer):
     ID[r"printf"] = KW_PRINTF
     ID[r"return"] = KW_RETURN
     ID[r"scanf"] = KW_SCANF
+    ID[r"if"] = KW_IF
+    ID[r"else"] = KW_ELSE
     STR = r'"([^"]|\\")*"'
 
     EQ_EQ = r"=="
@@ -96,22 +101,11 @@ class CParser(Parser):
     def fun_decl(self, p):
         return p[0]
 
-    @_('type funptr ID "(" fun_args ")"')
+    @_('type ID "(" fun_args ")"')
     def fun(self, p):
-        types, params = p[4]
+        types, params = p[3]
         tret = p[0]
-        for _ in range(p[1]):
-            tret = TypePtr(inner=tret)
-
-        return FunDeclTop(name=p[2], sig=TypeFun(params=types, ret=tret), params=params)
-
-    @_(r'funptr "*"')
-    def funptr(self, p):
-        return p[0] + 1
-
-    @_(r'')
-    def funptr(self, _):
-        return 0
+        return FunDeclTop(name=p[1], sig=TypeFun(params=types, ret=tret), params=params)
 
     @_("fun_args_")
     def fun_args(self, p):
@@ -121,18 +115,16 @@ class CParser(Parser):
     def fun_args(self, p):
         return ([], [])
 
-    @_('fun_args_ "," type lvar')
+    @_('fun_args_ "," type ID')
     def fun_args_(self, p):
         params = p[0]
-        name, typf = p[3]
-        params[0].append(typf(p[2]))
-        params[1].append(name.lit)
+        params[0].append(p[2])
+        params[1].append(p[1])
         return params
 
-    @_("type lvar")
+    @_("type ID")
     def fun_args_(self, p):
-        name, typf = p[1]
-        return ([typf(p[0])], [name.lit])
+        return ([p[0]], [p[1]])
 
     # --- Statements --- #
 
@@ -151,25 +143,43 @@ class CParser(Parser):
         r"printf_stmt",
         r"scanf_stmt",
         r"return_stmt",
+        r"if_stmt",
+        r"block_stmt",
     )
     def stmt(self, p):
         return p[0]
+
+    @_(r'KW_IF "(" or_exp ")" block_stmt else_stmt')
+    def if_stmt(self, p):
+        return IfStmt(cond=p[2], then=p[4], else_=p[5])
+
+    @_('KW_ELSE stmt')
+    def else_stmt(self, p):
+        return p[1]
+
+    @_("")
+    def else_stmt(self, p):
+        return None
 
     @_(r'exp ";"')
     def exp_stmt(self, p):
         return ExpStmt(p[0])
 
-    @_('KW_PRINTF "(" STR printf_args ")" ";"')
+    @_('KW_PRINTF "(" STR special_args ")" ";"')
     def printf_stmt(self, p):
         return PrintfStmt(p[2], p[3])
 
-    @_('printf_args "," exp')
-    def printf_args(self, p):
+    @_('KW_SCANF "(" STR special_args ")" ";"')
+    def scanf_stmt(self, p):
+        return ScanfStmt(p[2], p[3])
+
+    @_('special_args "," exp')
+    def special_args(self, p):
         p[0].append(p[2])
         return p[0]
 
     @_("")
-    def printf_args(self, p):
+    def special_args(self, p):
         return []
 
     @_(r'KW_RETURN ";"')
@@ -180,78 +190,69 @@ class CParser(Parser):
     def return_stmt(self, p):
         return ReturnStmt(p[1])
 
-    @_('KW_SCANF "(" STR scanf_args ")" ";"')
-    def scanf_stmt(self, p):
-        return ScanfStmt(p[2], p[3])
-
-    @_('scanf_args "," exp')
-    def scanf_args(self, p):
-        p[0].append(p[2])  # list of arguments
-        return p[0]
-
-    @_("")
-    def scanf_args(self, p):
-        return []
+    @_(r'"{" body "}"')
+    def block_stmt(self, p):
+        return BlockStmt(p[1])
 
     # --- Decl. Variables --- #
 
     @_(r'type var_decl_ ";"')
     def var_decl(self, p):
-        vars, _ = p[1]
-        return VarStmt(vars)
+        return VarStmt(typ=p[0], vars=p[1])
 
     @_(r'var_decl_ "," param_decl')
     def var_decl_(self, p):
-        typf, name, exp = p[2]
-        vars, typ = p[0]
-        vars.append((typf(typ), name, exp))
-        return vars, typ
+        name, idxs, exp = p[2]
+        p[0].append((name, idxs, exp))
+        return p[0]
 
     @_(r"param_decl")
     def var_decl_(self, p):
-        typ = p[-2]
-        typf, name, exp = p[0]
-        return [(typf(typ), name, exp)], typ
+        name, idxs, exp = p[0]
+        return [(name, idxs, exp)]
 
-    @_(r"lvar var_decl_exp")
+    @_(r"ID array_idxs var_decl_exp")
     def param_decl(self, p):
-        name, typf = p[0]
-        return typf, name, p[1]
-
-    @_(r'"=" exp')
-    def var_decl_exp(self, p):
-        return p[1]
+        return VarExp(lit=p[0]), p[1], p[2]
 
     @_(r"")
     def var_decl_exp(self, p):
         return None
 
-    @_(r'lvar "[" NUM "]"')
-    def lvar(self, p):
-        name, typf = p[0]
-        size = p[2]
-        return name, lambda typ: TypeArray(inner=typf(typ), size=size)
-
-    @_(r"lvar_ptr")
-    def lvar(self, p):
+    @_(r'array_idxs "[" NUM "]"')
+    def array_idxs(self, p):
+        p[0].append(p[2])
         return p[0]
 
-    @_(r'"*" lvar_ptr')
-    def lvar_ptr(self, p):
-        name, typf = p[1]
-        return name, lambda typ: TypePtr(inner=typf(typ))
+    @_(r"")
+    def array_idxs(self, p):
+        return []
 
-    @_(r"lvar_atom")
-    def lvar_ptr(self, p):
-        return p[0]
-
-    @_(r"ID")
-    def lvar_atom(self, p):
-        return VarExp(p[0]), lambda typ: typ
-
-    @_(r'"(" lvar ")"')
-    def lvar_atom(self, p):
+    @_(r'"=" array', '"=" exp')
+    def var_decl_exp(self, p):
         return p[1]
+
+    @_(r'"{" array_rec "}"', r'"{" array_base "}"')
+    def array(self, p):
+        return ArrayExp(exps=p[1])
+
+    @_(r'array_rec "," array')
+    def array_rec(self, p):
+        p[0].append(p[2])
+        return p[0]
+
+    @_(r'array')
+    def array_rec(self, p):
+        return [p[0]]
+
+    @_(r'array_base "," exp')
+    def array_base(self, p):
+        p[0].append(p[2])
+        return p[0]
+
+    @_(r"exp")
+    def array_base(self, p):
+        return [p[0]]
 
     # --- Expresiones --- #
 
@@ -343,7 +344,7 @@ class CParser(Parser):
 
     # CALL
 
-    @_(r'call "(" call_args ")"')
+    @_(r'ID "(" call_args ")"')
     def call(self, p):
         return CallExp(p[0], p[2])
 
@@ -387,6 +388,10 @@ class CParser(Parser):
         return NumExp(p[0])
 
     # --- Tipos --- #
+
+    @_(r'type "*"')
+    def type(self, p):
+        return TypePtr(inner=p[0])
 
     @_(r"KW_INT")
     def type(self, p):

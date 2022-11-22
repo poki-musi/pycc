@@ -1,4 +1,3 @@
-
 funcion(int n){return n;}
 
 int main(){
