@@ -23,6 +23,7 @@ class CLexer(Lexer):
         KW_SCANF,
         KW_IF,
         KW_ELSE,
+        KW_WHILE,
     }
 
     # fmt: off
@@ -52,6 +53,7 @@ class CLexer(Lexer):
     ID[r"scanf"] = KW_SCANF
     ID[r"if"] = KW_IF
     ID[r"else"] = KW_ELSE
+    ID[r"while"] = KW_WHILE
     STR = r'"([^"]|\\")*"'
 
     EQ_EQ = r"=="
@@ -149,7 +151,11 @@ class CParser(Parser):
     def stmt(self, p):
         return p[0]
 
-    @_(r'KW_IF "(" or_exp ")" block_stmt else_stmt')
+    @_(r'KW_WHILE "(" exp ")" block_stmt')
+    def while_stmt(self, p):
+        return WhileStmt(cond=p[2], block=p[4])
+
+    @_(r'KW_IF "(" exp ")" block_stmt else_stmt')
     def if_stmt(self, p):
         return IfStmt(cond=p[2], then=p[4], else_=p[5])
 

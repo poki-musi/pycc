@@ -123,13 +123,13 @@ class Compiler:
     def neg(self, arg): self.add_line(f'neg {arg}')
     def call(self, arg): self.add_line(f'call {arg}')
 
-    def j(self, arg): self.add_line(f'j {arg}')
+    def jmp(self, arg): self.add_line(f'jmp {arg}')
     def je(self, arg): self.add_line(f'je {arg}')
     def jne(self, arg): self.add_line(f'jne {arg}')
     def jge(self, arg): self.add_line(f'jge {arg}')
-    def jgt(self, arg): self.add_line(f'jgt {arg}')
+    def jg(self, arg): self.add_line(f'jg {arg}')
     def jle(self, arg): self.add_line(f'jle {arg}')
-    def jlt(self, arg): self.add_line(f'jlt {arg}')
+    def jl(self, arg): self.add_line(f'jl {arg}')
 
     def cdq(self): self.add_line(f'cdq')
     def ret(self): self.add_line(f'ret')
@@ -196,8 +196,8 @@ def compile(self: UnaryExp, cmp: Compiler):
 JUMP_TYPES = {
     "<": "jge",
     ">": "jle",
-    ">=": "jlt",
-    "<=": "jgt",
+    ">=": "jl",
+    "<=": "jg",
     "==": "jne",
     "!=": "je",
 }
@@ -242,7 +242,7 @@ def compile(self: BinaryExp, cmp: Compiler):
         cmp.cmpl(EBX, EAX)
         cond_jump(no)
         cmp.movl(S(1), EAX)
-        cmp.j(fin)
+        cmp.jmp(fin)
 
         cmp.label(no)
         cmp.movl(S(0), EAX)
@@ -299,7 +299,7 @@ def compile_array(cmp: Compiler, exp: ArrayExp, var, typ, idx=0):
     if isinstance(exp, ArrayExp):
         step = typ.inner.sizeof()
         for off in range(0, typ.size):
-            compile_array(cmp, exp.exps[off], var, typ.inner, idx+off*step)
+            compile_array(cmp, exp.exps[off], var, typ.inner, idx + off * step)
     else:
         exp.compile(cmp)
         cmp.movl(EAX, var.reg(off=-idx))
@@ -345,10 +345,25 @@ def compile(self: IfStmt, cmp: Compiler):
         end = cmp.make_label(".J")
         cmp.je(else_)  # ------------|
         self.then.compile(cmp)  #     |
-        cmp.j(end)  # ----|  |
+        cmp.jmp(end)  # ----|  |
         cmp.label(else_)  # -------|--|
         self.else_.compile(cmp)  # |
         cmp.label(end)  # ---------|
+
+
+@monkeypatch(WhileStmt)
+def compile(self: WhileStmt, cmp: Compiler):
+    THEN = cmp.make_label(".J")
+    FINAL = cmp.make_label(".J")
+
+    cmp.label(THEN)
+    self.cond.compile(cmp)
+    cmp.cmpl(S(0), EAX)
+    cmp.je(FINAL)
+    if self.body is not None:
+        self.body.compile(cmp)
+    cmp.jmp(THEN)
+    cmp.label(FINAL)
 
 
 # --- Top Level --- #

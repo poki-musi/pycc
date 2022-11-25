@@ -47,11 +47,7 @@ class Resolver:
         return local
 
     def find_var(self, name: str) -> Union[Local, Global, None]:
-        return (
-            self.scope is not None
-            and self.scope.find(name)
-            or None
-        )
+        return self.scope is not None and self.scope.find(name) or None
 
     def is_declared(self, name: str) -> bool:
         return self.find_var(name) is not None
@@ -94,7 +90,7 @@ def resolve(self, _):
 def resolve(self: ArrayExp, res: Resolver):
     texps = [exp.resolve(res) for exp in self.exps]
 
-    if not all(a==b for a,b in zip(texps, texps[1:])):
+    if not all(a == b for a, b in zip(texps, texps[1:])):
         raise ResolverError("elementos del vector literal no tienen los mismos tipos")
 
     return TypeArray(inner=texps[0], size=len(texps))
@@ -165,10 +161,14 @@ def resolve(self: BinaryExp, res: Resolver):
         if is_ptr_incr:
             if t1.is_ptr():
                 t = t1
-                self.exp2 = BinaryExp(exp1=self.exp2, exp2=NumExp(t.inner.sizeof()), op="*")
+                self.exp2 = BinaryExp(
+                    exp1=self.exp2, exp2=NumExp(t.inner.sizeof()), op="*"
+                )
             else:
                 t = t2
-                self.exp1 = BinaryExp(exp1=self.exp2, exp2=NumExp(t.inner.sizeof()), op="*")
+                self.exp1 = BinaryExp(
+                    exp1=self.exp2, exp2=NumExp(t.inner.sizeof()), op="*"
+                )
 
             return TypePtr(lvalue=False, inner=t1.is_ptr() and t1.inner or t2.inner)
         else:
@@ -178,7 +178,9 @@ def resolve(self: BinaryExp, res: Resolver):
 @monkeypatch(CallExp)
 def resolve(self: CallExp, res: Resolver):
     if res.find_var(self.callee) is not None:
-        raise ResolverError(f"función llamada '{self.callee}' es una variable, no una función")
+        raise ResolverError(
+            f"función llamada '{self.callee}' es una variable, no una función"
+        )
 
     fun: Fun = res.functions.get(self.callee, None)
     if fun is None:
@@ -259,7 +261,9 @@ def resolve(self: VarStmt, res: Resolver):
         typ = tbase.dup()
         for idx in reversed(idxs):
             if idx < 1:
-                raise ResolverError(f"variable '{name}' se declaró con un tamaño no estrictamente positivo")
+                raise ResolverError(
+                    f"variable '{name}' se declaró con un tamaño no estrictamente positivo"
+                )
             typ = TypeArray(inner=typ, size=idx)
 
         if exp is not None:
@@ -321,6 +325,7 @@ def resolve(self: ScanfStmt, res: Resolver):
     tstr = StrExp(self.fmt).resolve(res)
     self.stack_size = sum(t.sizeof() for t in targs) + tstr.sizeof()
 
+
 @monkeypatch(BlockStmt)
 def resolve(self: BlockStmt, res: Resolver):
     res.open_scope()
@@ -339,6 +344,16 @@ def resolve(self: IfStmt, res: Resolver):
 
     if self.else_ is not None:
         self.else_.resolve(res)
+
+
+@monkeypatch(WhileStmt)
+def resolve(self: WhileStmt, res: Resolver):
+    tcond = self.cond.resolve(res)
+    if not tcond.coerces_to(TypeInt):
+        raise ResolverError("la declaración if tiene una condicional que no es entera")
+
+    if self.block is not None:
+        self.block.resolve(res)
 
 
 # --- Top Level --- #
@@ -408,4 +423,6 @@ def resolve(self: Program, res: Resolver):
         raise ResolverError("función 'main' no presente")
 
     if res.functions["main"].typ != TypeFun(params=[], ret=TypeInt):
-        raise ResolverError("función 'main' debe de devolver un entero y no tener parámetros")
+        raise ResolverError(
+            "función 'main' debe de devolver un entero y no tener parámetros"
+        )

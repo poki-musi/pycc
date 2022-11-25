@@ -132,15 +132,24 @@ class ScanfStmt(Node):
     args: list[Node]
     stack_size: int = 0
 
+
 @dataclass
 class BlockStmt(Node):
     stmts: list[Node]
+
 
 @dataclass
 class IfStmt(Node):
     cond: Node
     then: BlockStmt
     else_: Union[BlockStmt, None]
+
+
+@dataclass
+class WhileStmt(Node):
+    cond: Node
+    block: Node
+
 
 
 # Toplevel
