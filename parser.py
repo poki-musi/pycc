@@ -107,7 +107,8 @@ class CParser(Parser):
     def fun(self, p):
         types, params = p[3]
         tret = p[0]
-        return FunDeclTop(name=p[1], sig=TypeFun(params=types, ret=tret), params=params)
+        name = p[1]
+        return FunDeclTop(name=name, sig=TypeFun(params=types, ret=tret), params=params)
 
     @_("fun_args_")
     def fun_args(self, p):
@@ -121,7 +122,7 @@ class CParser(Parser):
     def fun_args_(self, p):
         params = p[0]
         params[0].append(p[2])
-        params[1].append(p[1])
+        params[1].append(p[3])
         return params
 
     @_("type ID")
@@ -147,6 +148,7 @@ class CParser(Parser):
         r"return_stmt",
         r"if_stmt",
         r"block_stmt",
+        r"while_stmt",
     )
     def stmt(self, p):
         return p[0]

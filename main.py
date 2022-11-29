@@ -3,7 +3,7 @@ import sys
 import pprint
 from parser import CParser, CLexer, ParserError
 from resolver import Resolver, ResolverError
-from compiler import Compiler, CompilerError
+from compiler import Compiler
 from datetime import datetime
 
 

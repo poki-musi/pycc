@@ -353,8 +353,7 @@ def compile(self: WhileStmt, cmp: Compiler):
     self.cond.compile(cmp)
     cmp.cmpl(S(0), EAX)
     cmp.je(FINAL)
-    if self.body is not None:
-        self.body.compile(cmp)
+    self.block.compile(cmp)
     cmp.jmp(THEN)
     cmp.label(FINAL)
 

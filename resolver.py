@@ -352,8 +352,7 @@ def resolve(self: WhileStmt, res: Resolver):
     if not tcond.coerces_to(TypeInt):
         raise ResolverError("la declaración if tiene una condicional que no es entera")
 
-    if self.block is not None:
-        self.block.resolve(res)
+    self.block.resolve(res)
 
 
 # --- Top Level --- #
