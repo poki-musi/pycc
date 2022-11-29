@@ -147,7 +147,7 @@ def resolve(self: BinaryExp, res: Resolver):
     if self.op in {"==", "!=", "<=", ">=", "<", ">"}:
         if t1 != t2:
             raise ResolverError(f"no se pueden comparar tipos {t1} y {t2}")
-        return TypeInt
+        return TypeInt.dup(is_lvalue=False)
 
     if self.op in {"+", "-"}:
         is_ptr_incr = t1.is_ptr() and t2 == TypeInt or t2.is_ptr() and t1 == TypeInt
