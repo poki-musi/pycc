@@ -153,7 +153,7 @@ class CParser(Parser):
     def stmt(self, p):
         return p[0]
 
-    @_(r'KW_WHILE "(" exp ")" block_stmt')
+    @_(r'KW_WHILE "(" exp ")" stmt')
     def while_stmt(self, p):
         return WhileStmt(cond=p[2], block=p[4])
 
