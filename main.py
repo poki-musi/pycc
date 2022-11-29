@@ -24,7 +24,7 @@ def run_tests(log, err):
                 err("== " * 10 + "pass/" + file + " ==" * 10)
                 log("== " * 10 + "pass/" + file + " ==" * 10)
                 log(process_file(f.read()))
-            except (ParserError, ResolverError, CompilerError) as e:
+            except (ParserError, ResolverError) as e:
                 log(str(e))
                 err(str(e))
 
@@ -34,7 +34,7 @@ def run_tests(log, err):
                 err("== " * 10 + "error/" + file + " ==" * 10)
                 log("== " * 10 + "error/" + file + " ==" * 10)
                 log(process_file(f.read()))
-            except (ParserError, ResolverError, CompilerError) as e:
+            except (ParserError, ResolverError) as e:
                 log(str(e))
                 err(str(e))
 

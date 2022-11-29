@@ -136,13 +136,6 @@ class Compiler:
     # fmt: on
 
 
-# --- Instruction DSL --- #
-
-
-class CompilerError(Exception):
-    ...
-
-
 # --- Expressions --- #
 
 
@@ -353,8 +346,8 @@ def compile(self: IfStmt, cmp: Compiler):
 
 @monkeypatch(WhileStmt)
 def compile(self: WhileStmt, cmp: Compiler):
-    THEN = cmp.make_label(".J")
-    FINAL = cmp.make_label(".J")
+    THEN = cmp.make_label(".S")
+    FINAL = cmp.make_label(".E")
 
     cmp.label(THEN)
     self.cond.compile(cmp)
