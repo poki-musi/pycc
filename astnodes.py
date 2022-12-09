@@ -35,7 +35,6 @@ class Fun(TopObject):
     name: str = ""
     params: list[str] = field(default_factory=list)
     max_stack_size: int = 0
-    arg_space: int = 0
 
 
 # --- Nodos --- #
@@ -92,6 +91,7 @@ class ArrayExp(Node):
 class CallExp(Node):
     callee: str
     args: list[Node]
+    resolved_as: Fun = field(default=None)
 
 
 @dataclass
@@ -166,6 +166,13 @@ class FunDeclTop(Node):
 class FunDefTop(Node):
     head: FunDeclTop
     body: list[Node]
+    resolved_as: Fun = field(default=None)
+
+
+@dataclass
+class VarTop(Node):
+    typ: Type
+    vars: list[VarExp]
 
 
 @dataclass

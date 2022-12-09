@@ -89,11 +89,24 @@ class CParser(Parser):
     def S_(self, _):
         return []
 
-    @_(r"fun_decl", r"fun_def")
+    @_(r"fun_decl", r"fun_def", r"global_def")
     def toplevel_stmt(self, p):
         return p[0]
 
     # --- Functions --- #
+
+    @_(r'type global_names ";"')
+    def global_def(self, p):
+        return VarTop(p[0], p[1])
+
+    @_(r'global_names "," ID')
+    def global_names(self, p):
+        p[0].append(VarExp(lit=p[2]))
+        return p[0]
+
+    @_(r'ID')
+    def global_names(self, p):
+        return [VarExp(lit=p[0])]
 
     @_('fun "{" body "}"')
     def fun_def(self, p):

@@ -45,8 +45,7 @@ def main():
     except:
         pass
 
-    with open(f"out/{datetime.now()}.log", "w") as fh:
-        run_tests(fh.write, print)
+    run_tests(print, lambda a: a)
 
 
 if __name__ == "__main__":

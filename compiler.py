@@ -48,16 +48,16 @@ def S(n):
 
 @dataclass
 class Compiler:
-    functions: dict[str, Fun]
+    globals: dict[str, Fun]
     cur_fun: Fun = None
     label_count: int = 0
-    globals: list[None] = field(default_factory=list)  # TODO
+    header: list[str] = field(default_factory=list)
     constants: list[str] = field(default_factory=list)
     asm: list[str] = field(default_factory=list)
 
     @staticmethod
     def of_resolver(res: Resolver):
-        return Compiler(functions=res.functions)
+        return Compiler(globals=res.globals)
 
     def compile(self, ast: Node):
         ast.compile(self)
@@ -65,8 +65,10 @@ class Compiler:
 
     def generate(self):
         def gen():
-            if self.globals:
-                yield from self.globals
+            # yield " " * 4 + ".file  ???" # TODO
+
+            if self.header:
+                yield from self.header
                 yield ""
 
             if self.constants:
@@ -92,14 +94,16 @@ class Compiler:
         self.asm.append(label + ":")
 
     def add_string(self, string: str) -> str:
-        label = "." + self.make_label("L")
-        self.constants.append(label)
-        self.constants.append(f"    .string {string}")
+        label = self.make_label('L')
+        self.constants.append(f".{label}:")
+        self.constants.append(f'    .string "{string}"')
         return label
 
     def add_float(self, num: float) -> str:
-        self.label(self.make_label("L"))
-        self.add_line(f'.float "{num}"')
+        label = self.make_label('L')
+        self.constants.append(f".{label}:")
+        self.constants.append(f'    .float "{num}"')
+        return label
 
     def nl(self):
         self.add_line("")
@@ -161,7 +165,10 @@ def compile(self: VarExp, cmp: Compiler):
 def compile(self: UnaryExp, cmp: Compiler):
     if self.op == "&":
         if isinstance(self.exp, VarExp):
-            cmp.leal(self.exp.resolved_as.reg(), EAX)
+            if isinstance(self.exp.resolved_as, Local):
+                cmp.leal(self.exp.resolved_as.reg(), EAX)
+            else: # is a Global
+                cmp.movl(S(self.exp.resolved_as.reg()), EAX)
         elif isinstance(self.exp, UnaryExp) and self.exp.op == "*":
             self.exp.exp.compile(cmp)
         else:
@@ -244,15 +251,16 @@ def compile(self: BinaryExp, cmp: Compiler):
 
 @monkeypatch(CallExp)
 def compile(self: CallExp, cmp: Compiler):
-    fun: Fun = cmp.functions[self.callee]
+    fun: Fun = cmp.globals[self.callee]
 
     for arg in reversed(self.args):
         arg.compile(cmp)
         cmp.pushl(EAX)
 
     cmp.call(self.callee)
-    if fun.arg_space > 0:
-        cmp.addl(S(fun.arg_space), ESP)
+    size_args = sum(p.sizeof() for p in fun.typ.params)
+    if size_args > 0:
+        cmp.addl(S(size_args), ESP)
 
 
 @monkeypatch(AssignExp)
@@ -369,7 +377,7 @@ def compile(self: FunDeclTop, cmp: Compiler):
 @monkeypatch(FunDefTop)
 def compile(self: FunDefTop, cmp: Compiler):
     name = self.head.name
-    fun: Fun = cmp.functions[name]
+    fun: Fun = cmp.globals[name]
     bytes_locals = fun.max_stack_size
 
     cmp.add_line(".text")
@@ -391,6 +399,12 @@ def compile(self: FunDefTop, cmp: Compiler):
         cmp.movl(S(0), EAX)  # TODO: para cuando no seamos "monotipo"
     cmp.emit_return()
     cmp.nl()
+
+
+@monkeypatch(VarTop)
+def compile(self: VarTop, cmp: Compiler):
+    for var in self.vars:
+        cmp.header.append(f"    .comm {var.lit}, 4, 4")
 
 
 @monkeypatch(Program)
