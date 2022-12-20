@@ -42,7 +42,7 @@ def run_tests(log, err):
 def main():
     try:
         os.mkdir("./out")
-    except:
+    except Exception:
         pass
 
     run_tests(print, lambda a: a)

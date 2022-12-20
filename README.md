@@ -2,6 +2,12 @@
 
 Cada uno de los siguientes puntos será etiquetado con un número de estrellas (*), indicando cuánto queremos realizarlos eventualmente.
 
+## Relacionado con el AST (***)
+
+* Hacer que el "tipado" del AST sea más específico (hacer una subclase para
+  Stmts, Exps, etc).
+* Además, algunos refactors para simplificar código.
+
 ## Relacionado con `return`s (***)
 
 * Cuando se encuentra un return en un bloque de código, se tiene que lanzar
@@ -10,6 +16,8 @@ Cada uno de los siguientes puntos será etiquetado con un número de estrellas (
 * Además, código después del return debe de ser ignorado, no compilado (esto
   permite no emitir un return implícito al final de las funciones, lo cual
   está guay).
+* Además además, una función no void debe siempre de devolver un valor, toca
+  verificar todos los caminos por un return.
 
 ## Refactorizar `scanf`/`printf` (***)
 

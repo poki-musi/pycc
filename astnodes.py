@@ -40,21 +40,24 @@ class Fun(TopObject):
 # --- Nodos --- #
 
 
-class Node:
-    ...
+@dataclass
+class Ast:
+    first: Tuple[int, int]
+    last: Tuple[int, int]
 
+class Exp(Ast):
+    ...
 
 # Expresiones
 
-
 @dataclass
-class VarExp(Node):
+class VarExp(Exp):
     lit: str
     resolved_as: Local = None
 
 
 @dataclass
-class StrExp(Node):
+class StrExp(Exp):
     lit: str
 
 
