@@ -34,7 +34,7 @@ class Resolver:
     scope: Scope = None
     globals: dict[str, Union[Fun, Global]] = field(default_factory=dict)
 
-    def resolve(self, ast: Node) -> Type:
+    def resolve(self, ast: Ast) -> Type:
         ast.resolve(self)
         return self
 

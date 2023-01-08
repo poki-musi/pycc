@@ -26,6 +26,13 @@ class Type:
     def dup_as_lvalue(self) -> "Type":
         return self.dup(True)
 
+    def pointify(self, n: int) -> "Type":
+        typ = self
+        for _ in range(n):
+            typ = TypePtr(inner=typ)
+        return typ
+
+
 
 @dataclass
 class TypeName(Type):

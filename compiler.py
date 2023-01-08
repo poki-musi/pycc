@@ -59,7 +59,7 @@ class Compiler:
     def of_resolver(res: Resolver):
         return Compiler(globals=res.globals)
 
-    def compile(self, ast: Node):
+    def compile(self, ast: Ast):
         ast.compile(self)
         return self
 
