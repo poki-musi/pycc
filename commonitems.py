@@ -26,4 +26,4 @@ class Fun(TopObject):
 
 @dataclass
 class NativeFun(TopObject):
-    ...
+    name: str = ""

@@ -69,8 +69,6 @@ class ParserError(Exception):
 class CParser(Parser):
     tokens = CLexer.tokens
 
-    debugfile = "hi.log"
-
     def error(self, tkn):
         raise ParserError(tkn)
 
@@ -132,7 +130,7 @@ class CParser(Parser):
             params = []
         else:
             types, nptrs, params = zip(*p[4])
-            types = [typ.pointify(nptr) for typ, nptr in zip(types, nptrs)]
+            types = [typ[0].pointify(nptr) for typ, nptr in zip(types, nptrs)]
 
         return FunDeclTop(
             pos=lineno,
