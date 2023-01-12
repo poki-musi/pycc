@@ -37,7 +37,7 @@ class CLexer(Lexer):
     literals = {
         "(", ")", "=", ";", ",", ">", "<", "+", "-",
         "*", "/", "{", "}", "!", "[", "]", "&",
-        "|", "^", "~",
+        "|", "^", "~", "%",
     }
     # fmt: on
 
@@ -454,18 +454,28 @@ class CParser(Parser):
     # --- Comparison --- #
 
     @_(
-        "comp_exp EQ_EQ sum",
-        "comp_exp NOT_EQ sum",
-        "comp_exp LESSER_EQ sum",
-        "comp_exp GREATER_EQ sum",
-        'comp_exp ">" sum',
-        'comp_exp "<" sum',
+        "comp_exp EQ_EQ shiftop",
+        "comp_exp NOT_EQ shiftop",
+        "comp_exp LESSER_EQ shiftop",
+        "comp_exp GREATER_EQ shiftop",
+        'comp_exp ">" shiftop',
+        'comp_exp "<" shiftop',
     )
     def comp_exp(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op=p[1], exp2=p[2])
 
-    @_("sum")
+    @_("shiftop")
     def comp_exp(self, p):
+        return p[0]
+
+    # --- Lshift/Rshift --- #
+
+    @_(r'shiftop SHIFT_R sum', r'shiftop SHIFT_L sum')
+    def shiftop(self, p):
+        return BinaryExp(pos=p[0].pos, exp1=p[0], op=p[1], exp2=p[2])
+
+    @_("sum")
+    def shiftop(self, p):
         return p[0]
 
     # --- Summands --- #
@@ -480,22 +490,12 @@ class CParser(Parser):
 
     # --- Product --- #
 
-    @_('prod "*" shiftop', 'prod "/" shiftop')
+    @_('prod "*" unary', 'prod "/" unary', 'prod "%" unary')
     def prod(self, p):
-        return BinaryExp(pos=p[0].pos, exp1=p[0], op=p[1], exp2=p[2])
-
-    @_("shiftop")
-    def prod(self, p):
-        return p[0]
-
-    # --- Lshift/Rshift --- #
-
-    @_(r'shiftop SHIFT_R unary', r'shiftop SHIFT_L unary')
-    def shiftop(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op=p[1], exp2=p[2])
 
     @_("unary")
-    def shiftop(self, p):
+    def prod(self, p):
         return p[0]
 
     # --- Unary --- #

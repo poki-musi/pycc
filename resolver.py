@@ -170,7 +170,7 @@ def resolve(self: BinaryExp, res: Resolver):
     t1 = self.exp1.resolve(res)
     t2 = self.exp2.resolve(res)
 
-    if self.op in {"*", "/", "||", "&&", "|", "&", "^", "<<", ">>"}:
+    if self.op in {"*", "/", "%", "||", "&&", "|", "&", "^", "<<", ">>"}:
         if t1 != TypeInt or t2 != TypeInt:
             res.throw(
                 self,
