@@ -1,6 +1,8 @@
-int main() {
-  static int x;
-  int *y[3];
+int z;
 
-  *y[0] = x + 1;
+int main() {
+  int x;
+  static int y;
+
+  int a = x + y + z;
 }
