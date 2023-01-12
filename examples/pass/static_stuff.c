@@ -1,6 +1,6 @@
 int main() {
   static int x;
-  {
-    static int y;
-  }
+  int *y[3];
+
+  *y[0] = x + 1;
 }

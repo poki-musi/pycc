@@ -1,5 +1,6 @@
 # fmt: off
 from sly import Lexer, Parser
+from sly.lex import Token
 from astnodes import *
 from typenodes import *
 # fmt: on
@@ -8,12 +9,15 @@ from typenodes import *
 class CLexer(Lexer):
     tokens = {
         NUM,
+        NUM_LIT,
         OR,
         AND,
         EQ_EQ,
         NOT_EQ,
         GREATER_EQ,
         LESSER_EQ,
+        SHIFT_L,
+        SHIFT_R,
         ID,
         STR,
         KW_INT,
@@ -22,13 +26,18 @@ class CLexer(Lexer):
         KW_IF,
         KW_ELSE,
         KW_WHILE,
+        KW_FOR,
         KW_STATIC,
+        KW_BREAK,
+        KW_CONTINUE,
+        KW_SIZEOF,
     }
 
     # fmt: off
     literals = {
         "(", ")", "=", ";", ",", ">", "<", "+", "-",
-        "*", "/", "{", "}", "!", "&", "[", "]",
+        "*", "/", "{", "}", "!", "[", "]", "&",
+        "|", "^", "~",
     }
     # fmt: on
 
@@ -39,9 +48,17 @@ class CLexer(Lexer):
     def ignore_newline(self, t):
         self.lineno += len(t.value)
 
-    @_(r"[0-9]+")
+    @_(r"\d+")
     def NUM(self, t):
         t.value = int(t.value)
+        return t
+
+    @_("0x[0-9a-fA-F]+", "0b[0-1]+")
+    def NUM_LIT(self, t):
+        if t.value.startswith("0x"):
+            t.value = int(t.value, 16)
+        else:
+            t.value = int(t.value, 2)
         return t
 
     ID = r"[a-zA-Z_][a-zA-Z0-9_]*"
@@ -51,7 +68,11 @@ class CLexer(Lexer):
     ID[r"if"] = KW_IF
     ID[r"else"] = KW_ELSE
     ID[r"while"] = KW_WHILE
+    ID[r"for"] = KW_FOR
     ID[r"static"] = KW_STATIC
+    ID[r"break"] = KW_BREAK
+    ID[r"continue"] = KW_CONTINUE
+    ID[r"sizeof"] = KW_SIZEOF
     STR = r'"([^"]|\\")*"'
 
     EQ_EQ = r"=="
@@ -60,6 +81,14 @@ class CLexer(Lexer):
     NOT_EQ = r"!="
     GREATER_EQ = r">="
     LESSER_EQ = r"<="
+    SHIFT_L = r"<<"
+    SHIFT_R = r">>"
+
+    def error(self, t):
+        tkn = Token()
+        tkn.value = t.value[0]
+        tkn.lineno = self.lineno
+        raise ParserError(tkn)
 
 
 class ParserError(Exception):
@@ -68,6 +97,8 @@ class ParserError(Exception):
 
 class CParser(Parser):
     tokens = CLexer.tokens
+
+    # debugfile = "debug.log"
 
     def error(self, tkn):
         raise ParserError(tkn)
@@ -174,15 +205,62 @@ class CParser(Parser):
         r"if_stmt",
         r"block_stmt",
         r"while_stmt",
+        r"break_stmt",
+        r"continue_stmt",
+        r"for_stmt",
     )
     def stmt(self, p):
         return p[0]
 
-    # --- While Statement --- #
+    # --- While + Break + Continue Statements --- #
 
     @_(r'KW_WHILE "(" exp ")" block_stmt')
     def while_stmt(self, p):
         return WhileStmt(pos=p.lineno, cond=p[2], block=p[4])
+
+    @_(r'KW_BREAK ";"')
+    def break_stmt(self, p):
+        return BreakStmt(pos=p.lineno)
+
+    @_(r'KW_CONTINUE ";"')
+    def continue_stmt(self, p):
+        return ContinueStmt(pos=p.lineno)
+
+    # --- For Loops --- #
+
+    @_(r'KW_FOR "(" for_decl for_cond for_exp ")" block_stmt')
+    def for_stmt(self, p):
+        decl = p[2]
+        cond = p[3] or NumExp(pos=1, lit=1)
+        exp = p[4]
+        body = p[6]
+
+        if exp is not None:
+            body.stmts.append(exp)
+
+        ret = WhileStmt(pos=p.lineno, cond=cond, block=body)
+        if decl is not None:
+            ret = BlockStmt(pos=p.lineno, stmts=[decl, ret])
+
+        return ret
+
+    @_(r"stmt", '";"')
+    def for_decl(self, p):
+        if p[0] == ";":
+            return None
+        else:
+            return p[0]
+
+    @_(r'exp ";"', '";"')
+    def for_cond(self, p):
+        if p[0] == ";":
+            return None
+        else:
+            return p[0]
+
+    @_(r"exp", "")
+    def for_exp(self, p):
+        return len(p) == 1 and p[0] or None
 
     # --- If Statement --- #
 
@@ -225,13 +303,13 @@ class CParser(Parser):
         typ, pos = p[1]
         return VarStmt(pos=pos, typ=typ, vars=p[2], is_static=p[0])
 
-    @_(r'KW_STATIC')
+    @_(r"KW_STATIC")
     def is_static(self, p):
-        return True, p.lineno
+        return True
 
-    @_(r'')
+    @_(r"")
     def is_static(self, p):
-        return False, -1
+        return False
 
     @_(r'var_decl_ "," param_decl')
     def var_decl_(self, p):
@@ -266,6 +344,12 @@ class CParser(Parser):
 
     @_(r'array_idxs "[" NUM "]"')
     def array_idxs(self, p):
+        if p[2] == 0:
+            tkn = Token()
+            tkn.value = f"[{p[2]}]"
+            tkn.lineno = self.lineno
+            raise ParserError(tkn)
+
         p[0].append(p[2])
         return p[0]
 
@@ -329,23 +413,53 @@ class CParser(Parser):
 
     # --- && --- #
 
-    @_("and_exp AND comp_exp")
+    @_("and_exp AND or_bin")
     def and_exp(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op="&&", exp2=p[2])
 
-    @_("comp_exp")
+    @_("or_bin")
     def and_exp(self, p):
+        return p[0]
+
+    # --- | --- #
+
+    @_(r'or_bin "|" xor_bin')
+    def or_bin(self, p):
+        return BinaryExp(pos=p[0].pos, exp1=p[0], op="|", exp2=p[2])
+
+    @_(r'xor_bin')
+    def or_bin(self, p):
+        return p[0]
+
+    # --- ^ --- #
+
+    @_(r'xor_bin "^" and_bin')
+    def xor_bin(self, p):
+        return BinaryExp(pos=p[0].pos, exp1=p[0], op="^", exp2=p[2])
+
+    @_(r'and_bin')
+    def xor_bin(self, p):
+        return p[0]
+
+    # --- & --- #
+
+    @_(r'and_bin "&" comp_exp')
+    def and_bin(self, p):
+        return BinaryExp(pos=p[0].pos, exp1=p[0], op="&", exp2=p[2])
+
+    @_(r'comp_exp')
+    def and_bin(self, p):
         return p[0]
 
     # --- Comparison --- #
 
     @_(
-        "sum EQ_EQ comp_exp",
-        "sum NOT_EQ comp_exp",
-        "sum LESSER_EQ comp_exp",
-        "sum GREATER_EQ comp_exp",
-        'sum ">" comp_exp',
-        'sum "<" comp_exp',
+        "comp_exp EQ_EQ sum",
+        "comp_exp NOT_EQ sum",
+        "comp_exp LESSER_EQ sum",
+        "comp_exp GREATER_EQ sum",
+        'comp_exp ">" sum',
+        'comp_exp "<" sum',
     )
     def comp_exp(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op=p[1], exp2=p[2])
@@ -366,12 +480,22 @@ class CParser(Parser):
 
     # --- Product --- #
 
-    @_('prod "*" unary', 'prod "/" unary')
+    @_('prod "*" shiftop', 'prod "/" shiftop')
     def prod(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op=p[1], exp2=p[2])
 
-    @_("unary")
+    @_("shiftop")
     def prod(self, p):
+        return p[0]
+
+    # --- Lshift/Rshift --- #
+
+    @_(r'shiftop SHIFT_R unary', r'shiftop SHIFT_L unary')
+    def shiftop(self, p):
+        return BinaryExp(pos=p[0].pos, exp1=p[0], op=p[1], exp2=p[2])
+
+    @_("unary")
+    def shiftop(self, p):
         return p[0]
 
     # --- Unary --- #
@@ -381,9 +505,14 @@ class CParser(Parser):
         '"-" unary',
         '"*" unary',
         '"&" unary',
+        '"~" unary',
     )
     def unary(self, p):
         return UnaryExp(pos=p.lineno, op=p[0], exp=p[1])
+
+    @_(r'"(" type_lit ")" unary')
+    def unary(self, p):
+        return CastExp(pos=p.lineno, to=p[1], exp=p[3])
 
     @_("call")
     def unary(self, p):
@@ -434,6 +563,13 @@ class CParser(Parser):
     def atom(self, p):
         return p[1]
 
+    @_(
+        'KW_SIZEOF "(" exp ")"',
+        'KW_SIZEOF "(" type_lit ")"',
+    )
+    def atom(self, p):
+        return SizeofExp(pos=p.lineno, type=p[2])
+
     @_("ID")
     def atom(self, p):
         return VarExp(pos=p.lineno, lit=p[0], resolved_as=None)
@@ -442,9 +578,37 @@ class CParser(Parser):
     def atom(self, p):
         return NumExp(pos=p.lineno, lit=p[0])
 
+    @_("NUM_LIT")
+    def atom(self, p):
+        return NumExp(pos=p.lineno, lit=p[0])
+
     @_("STR")
     def atom(self, p):
         return StrExp(pos=p.lineno, lit=p[0])
+
+    # --- Type "Literal" --- #
+
+    @_('type_lit "[" NUM "]"')
+    def type_lit(self, p):
+        if p[2] == 0:
+            tkn = Token()
+            tkn.value = f"[{p[2]}]"
+            tkn.lineno = self.lineno
+            raise ParserError(tkn)
+
+        return p[0].as_array(p[2])
+
+    @_("type_lit_ptr")
+    def type_lit(self, p):
+        return p[0]
+
+    @_('type_lit_ptr "*"')
+    def type_lit_ptr(self, p):
+        return p[0].as_ptr()
+
+    @_("type")
+    def type_lit_ptr(self, p):
+        return p[0][0]
 
     # --- Types --- #
 

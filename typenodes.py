@@ -6,18 +6,24 @@ import copy
 @dataclass
 class Type:
     lvalue: bool = False
+    const: bool = False
 
     # fmt: off
     def is_lvalue(self) -> bool: return self.lvalue
     def is_rvalue(self) -> bool: return not self.lvalue
+    def is_const(self) -> bool: return self.const
     def sizeof(self) -> int: return 0
     def is_ptr(self) -> bool: return False
+    def as_ptr(self) -> "Type": return TypePtr(inner=self)
+    def as_array(self, size: int) -> "Type": return TypeArray(inner=self, size=size)
     def __eq__(self, typ) -> bool: return False
     # fmt: on
 
-    def dup(self, is_lvalue=False) -> "Type":
+    def dup(self, is_lvalue: bool = False, is_const: bool = None) -> "Type":
         d = copy.copy(self)
         d.lvalue = is_lvalue
+        if is_const is not None:
+            d.const = is_const
         return d
 
     def dup_as_rvalue(self) -> "Type":
@@ -33,22 +39,27 @@ class Type:
         return typ
 
 
-
 @dataclass
-class TypeName(Type):
+class TypeBuiltin(Type):
     name: str = ""
     size: int = 4
+
+    def __str__(self) -> str:
+        return self.name
 
     def sizeof(self) -> int:
         return self.size
 
     def __eq__(self, typ):
-        return isinstance(typ, TypeName) and typ.name == self.name
+        return isinstance(typ, TypeBuiltin) and typ.name == self.name
 
 
 @dataclass
 class TypePtr(Type):
     inner: Type = None
+
+    def __str__(self) -> str:
+        return f"{self.inner}*"
 
     def sizeof(self) -> int:
         return 4  # ptr size in bytes
@@ -64,6 +75,9 @@ class TypePtr(Type):
 class TypeArray(Type):
     inner: Type = None
     size: int = 0
+
+    def __str__(self) -> str:
+        return f"{self.inner}[{self.size}]"
 
     def sizeof(self) -> int:
         return self.inner.sizeof() * self.size
@@ -90,6 +104,9 @@ class TypeFun(Type):
     params: list[Type] = None
     ret: Type = None
 
+    def __str__(self) -> str:
+        return f"{self.ret}(*)({', '.join(map(str, self.params))})"
+
     def __eq__(self, typ):
         return (
             isinstance(typ, TypeFun)
@@ -98,6 +115,7 @@ class TypeFun(Type):
         )
 
 
-TypeVoid = TypeName(name="void", size=0)
-TypeInt = TypeName(name="int", size=4)
-TypeChar = TypeName(name="char", size=1)
+TypeVoid = TypeBuiltin(name="void", size=1)
+TypeChar = TypeBuiltin(name="char", size=1)
+TypeInt = TypeBuiltin(name="int", size=4)
+TypeFloat = TypeBuiltin(name="float", size=4)

@@ -1,23 +1,33 @@
 import sys
+from sly.lex import LexError
 from parser import CParser, CLexer, ParserError
-# from resolver import Resolver, ResolverError
-# from compiler import Compiler
+from resolver import Resolver, ResolverError
+from compiler import Compiler
+from commonitems import native_functions
 
 
 def process_file(inp):
-    tokens = CLexer().tokenize(inp)
-    ast = CParser().parse(tokens)
-    # res = Resolver().resolve(ast)
-    # asm = Compiler.of_resolver(res).compile(ast).generate()
-    # return asm
-    return ast
+    try:
+        ast = CParser().parse(CLexer().tokenize(inp))
+    except ParserError as e:
+        tkn = e.args[0]
+        print(f"error:{tkn.lineno}: error de gramática, en token '{tkn.value}'")
+        return None
+
+    res = Resolver(globals={**native_functions}).resolve(ast)
+    if res.error_state:
+        return None
+
+    return Compiler.of_resolver(res).compile(ast).generate()
 
 
 def main():
     if len(sys.argv) == 2:
         with open(sys.argv[1], "r") as f:
             data = f.read()
-        print(process_file(data))
+        data = process_file(data)
+        if data is not None:
+            print(data)
     else:
         print(
             """

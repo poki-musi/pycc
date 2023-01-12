@@ -11,7 +11,9 @@ def run_tests():
             print("-" * 10 + " " + file + " " + "-" * 10)
             with open(file, "r") as f:
                 data = f.read()
-            print(m.process_file(data))
+            data = m.process_file(data)
+            if data is not None:
+                print(data)
             print("-" * 10 + " " + file + " " + "-" * 10)
 
 

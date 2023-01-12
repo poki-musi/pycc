@@ -1,5 +1,6 @@
 from astnodes import *
 from typenodes import *
+from commonitems import *
 from resolver import Resolver
 from dataclasses import dataclass, field
 from typing import Union
@@ -28,6 +29,7 @@ class Reg:
 
 EAX = Reg("eax")
 EBX = Reg("ebx")
+EDX = Reg("edx")
 EBP = Reg("ebp")
 ESP = Reg("esp")
 
@@ -54,6 +56,8 @@ class Compiler:
     header: list[str] = field(default_factory=list)
     constants: list[str] = field(default_factory=list)
     asm: list[str] = field(default_factory=list)
+    break_stack: list[str] = field(default_factory=list)
+    continue_stack: list[str] = field(default_factory=list)
 
     @staticmethod
     def of_resolver(res: Resolver):
@@ -94,16 +98,19 @@ class Compiler:
         self.asm.append(label + ":")
 
     def add_string(self, string: str) -> str:
-        label = self.make_label('L')
-        self.constants.append(f".{label}:")
-        self.constants.append(f'    .string "{string}"')
+        label = "." + self.make_label("L")
+        self.constants.append(f"{label}:")
+        self.constants.append(f"    .string {string}")
         return label
 
     def add_float(self, num: float) -> str:
-        label = self.make_label('L')
-        self.constants.append(f".{label}:")
+        label = "." + self.make_label("L")
+        self.constants.append(f"{label}:")
         self.constants.append(f'    .float "{num}"')
         return label
+
+    def add_global(self, name) -> None:
+        self.header.append(f"    .comm {name}, 4, 4")
 
     def nl(self):
         self.add_line("")
@@ -120,6 +127,9 @@ class Compiler:
     def movl(self, orig, to): self.add_line(f'movl {orig}, {to}')
     def cmpl(self, orig, to): self.add_line(f'cmpl {orig}, {to}')
     def leal(self, orig, to): self.add_line(f'leal {orig}, {to}')
+    def andl(self, orig, to): self.add_line(f'andl {orig}, {to}')
+    def orl(self, orig, to): self.add_line(f'orl {orig}, {to}')
+    def xorl(self, orig, to): self.add_line(f'xorl {orig}, {to}')
 
     def idivl(self, arg): self.add_line(f'idivl {arg}')
     def pushl(self, arg): self.add_line(f'pushl {arg}')
@@ -167,7 +177,7 @@ def compile(self: UnaryExp, cmp: Compiler):
         if isinstance(self.exp, VarExp):
             if isinstance(self.exp.resolved_as, Local):
                 cmp.leal(self.exp.resolved_as.reg(), EAX)
-            else: # is a Global
+            else:  # is a Global
                 cmp.movl(S(self.exp.resolved_as.reg()), EAX)
         elif isinstance(self.exp, UnaryExp) and self.exp.op == "*":
             self.exp.exp.compile(cmp)
@@ -185,6 +195,9 @@ def compile(self: UnaryExp, cmp: Compiler):
 
     if self.op == "-":
         cmp.neg(EAX)
+    elif self.op == "~":
+        # EAX xor 1111..111 = ~EAX
+        cmp.xorl(S(4294967295), EAX)
     elif self.op == "!":
         label = cmp.make_label(".J")
         cmp.cmpl(S(0), EAX)
@@ -233,6 +246,16 @@ def compile(self: BinaryExp, cmp: Compiler):
     elif self.op == "/":
         cmp.cdq()
         cmp.idivl(EBX)
+    elif self.op == "&":
+        cmp.andl(EBX, EAX)
+    elif self.op == "|":
+        cmp.orl(EBX, EAX)
+    elif self.op == "^":
+        cmp.xorl(EBX, EAX)
+    elif self.op == "%":
+        cmp.cdq()
+        cmp.idivl(EBX)
+        cmp.movl(EDX, EAX)
     else:
         # remaining cases: <, >, <=, >=, ==, !=
         cond_jump = getattr(cmp, JUMP_TYPES[self.op])
@@ -251,13 +274,13 @@ def compile(self: BinaryExp, cmp: Compiler):
 
 @monkeypatch(CallExp)
 def compile(self: CallExp, cmp: Compiler):
-    fun: Fun = cmp.globals[self.callee]
+    fun: Fun = self.callee.resolved_as
 
     for arg in reversed(self.args):
         arg.compile(cmp)
         cmp.pushl(EAX)
 
-    cmp.call(self.callee)
+    cmp.call(fun.name)
     size_args = sum(p.sizeof() for p in fun.typ.params)
     if size_args > 0:
         cmp.addl(S(size_args), ESP)
@@ -269,11 +292,22 @@ def compile(self: AssignExp, cmp: Compiler):
 
     if isinstance(self.var, VarExp):
         cmp.movl(EAX, self.var.resolved_as.reg())
+
     elif isinstance(self.var, UnaryExp) and self.var.op == "*":
         cmp.pushl(EAX)
         self.var.exp.compile(cmp)
         cmp.popl(EBX)
         cmp.movl(EAX, EBX.deref())
+
+
+@monkeypatch(SizeofExp)
+def compile(self: SizeofExp, cmp: Compiler):
+    cmp.movl(S(self.type.sizeof()), EAX)
+
+
+@monkeypatch(CastExp)
+def compile(self: CastExp, cmp: Compiler):
+    cmp.compile(self.exp)
 
 
 # --- Statements --- #
@@ -286,14 +320,18 @@ def compile(self: ExpStmt, cmp: Compiler):
 
 @monkeypatch(VarStmt)
 def compile(self: VarStmt, cmp: Compiler):
-    for name, idxs, exp in self.vars:
-        var = name.resolved_as
-        if exp is not None:
-            if len(idxs) > 0:
-                compile_array(cmp, exp, var, var.typ)
-            else:
-                exp.compile(cmp)
-                cmp.movl(EAX, var.reg())
+    for var in self.vars:
+        if self.is_static:
+            cmp.add_global(var.resolved_as.name)
+
+        if var.exp is None:
+            continue
+
+        if len(var.size_arrays) > 0:
+            compile_array(cmp, var.exp, var.resolved_as, var.typ)
+        else:
+            var.exp.compile(cmp)
+            cmp.movl(EAX, var.resolved_as.reg())
 
 
 def compile_array(cmp: Compiler, exp: ArrayExp, var, typ, idx=0):
@@ -311,18 +349,6 @@ def compile(self: ExpStmt, cmp: Compiler):
     if self.exp is not None:
         self.exp.compile(cmp)
     cmp.emit_return()
-
-
-@monkeypatch(PrintfStmt)
-@monkeypatch(ScanfStmt)
-def compile(self: PrintfStmt, cmp: Compiler):
-    for arg in reversed(self.args):
-        arg.compile(cmp)
-        cmp.pushl(EAX)
-    StrExp(self.fmt).compile(cmp)
-    cmp.pushl(EAX)
-    cmp.call("printf" if isinstance(self, PrintfStmt) else "scanf")
-    cmp.addl(S(self.stack_size), ESP)
 
 
 @monkeypatch(BlockStmt)
@@ -357,6 +383,9 @@ def compile(self: WhileStmt, cmp: Compiler):
     THEN = cmp.make_label(".S")
     FINAL = cmp.make_label(".E")
 
+    cmp.break_stack.append(FINAL)
+    cmp.continue_stack.append(THEN)
+
     cmp.label(THEN)
     self.cond.compile(cmp)
     cmp.cmpl(S(0), EAX)
@@ -364,6 +393,19 @@ def compile(self: WhileStmt, cmp: Compiler):
     self.block.compile(cmp)
     cmp.jmp(THEN)
     cmp.label(FINAL)
+
+    cmp.break_stack.pop()
+    cmp.continue_stack.pop()
+
+
+@monkeypatch(BreakStmt)
+def compile(self: BreakStmt, cmp: Compiler):
+    cmp.jmp(cmp.break_stack[-1])
+
+
+@monkeypatch(ContinueStmt)
+def compile(self: ContinueStmt, cmp: Compiler):
+    cmp.jmp(cmp.continue_stack[-1])
 
 
 # --- Top Level --- #
@@ -377,8 +419,7 @@ def compile(self: FunDeclTop, cmp: Compiler):
 @monkeypatch(FunDefTop)
 def compile(self: FunDefTop, cmp: Compiler):
     name = self.head.name
-    fun: Fun = cmp.globals[name]
-    bytes_locals = fun.max_stack_size
+    bytes_locals = self.max_stack_size
 
     cmp.add_line(".text")
     cmp.add_line(f".globl {name}")
@@ -404,7 +445,7 @@ def compile(self: FunDefTop, cmp: Compiler):
 @monkeypatch(VarTop)
 def compile(self: VarTop, cmp: Compiler):
     for var in self.vars:
-        cmp.header.append(f"    .comm {var.lit}, 4, 4")
+        cmp.add_global(var.resolved_as.name)
 
 
 @monkeypatch(Program)

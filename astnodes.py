@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typenodes import *
 from typing import Tuple, Optional, Union
-from commonitems import *
 
 
 def monkeypatch(cls):
@@ -26,7 +25,7 @@ class Ast:
 @dataclass
 class VarExp(Ast):
     lit: str
-    resolved_as: Local = None
+    resolved_as: "Local" = None
 
 
 @dataclass
@@ -65,13 +64,24 @@ class ArrayExp(Ast):
 
 @dataclass
 class CallExp(Ast):
-    callee: Ast
+    callee: VarExp
     args: list[Ast]
 
 
 @dataclass
 class AssignExp(Ast):
     var: Ast
+    exp: Ast
+
+
+@dataclass
+class SizeofExp(Ast):
+    type: Type
+
+
+@dataclass
+class CastExp(Ast):
+    to: Type
     exp: Ast
 
 
@@ -84,6 +94,13 @@ class VarDecl(Ast):
     num_nested_ptr: int
     size_arrays: list[int]
     exp: Union[Ast, None]
+    resolved_as: "Local" = None
+
+    def wrap_type(self, typ: Type) -> Type:
+        typ = typ.pointify(self.num_nested_ptr)
+        for arrsize in self.size_arrays:
+            typ = TypeArray(inner=typ, size=arrsize)
+        return typ
 
 
 @dataclass
@@ -121,6 +138,16 @@ class WhileStmt(Ast):
     block: Ast
 
 
+@dataclass
+class BreakStmt(Ast):
+    pass
+
+
+@dataclass
+class ContinueStmt(Ast):
+    pass
+
+
 # Toplevel
 
 
@@ -136,13 +163,13 @@ class FunDefTop(Ast):
     head: FunDeclTop
     body: list[Ast]
     max_stack_size: int = 0
-    resolved_as: Global = None
+    resolved_as: "Global" = None
 
 
 @dataclass
 class VarTop(Ast):
     typ: Type
-    vars: list[VarExp]
+    vars: list[VarDecl]
 
 
 @dataclass
