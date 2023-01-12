@@ -296,7 +296,8 @@ def compile(self: AssignExp, cmp: Compiler):
     elif isinstance(self.var, UnaryExp) and self.var.op == "*":
         cmp.pushl(EAX)
         self.var.exp.compile(cmp)
-        cmp.popl(EBX)
+        cmp.movl(EAX, EBX)
+        cmp.popl(EAX)
         cmp.movl(EAX, EBX.deref())
 
 
