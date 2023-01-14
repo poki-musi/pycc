@@ -329,7 +329,7 @@ def compile(self: VarStmt, cmp: Compiler):
             continue
 
         if len(var.size_arrays) > 0:
-            compile_array(cmp, var.exp, var.resolved_as, var.typ)
+            compile_array(cmp, var.exp, var.resolved_as, var.resolved_as.typ)
         else:
             var.exp.compile(cmp)
             cmp.movl(EAX, var.resolved_as.reg())

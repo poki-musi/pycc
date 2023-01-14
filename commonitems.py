@@ -5,28 +5,28 @@ from typing import Tuple, Optional, Union
 
 
 @dataclass
-class TopObject:
+class Item:
     typ: Type = None
 
 
 @dataclass
-class Local(TopObject):
+class Local(Item):
     addr: int = 0
 
 
 @dataclass
-class Global(TopObject):
+class Global(Item):
     name: str = ""
 
 
 @dataclass
-class Fun(TopObject):
+class Fun(Item):
     name: str = ""
     initialized: bool = False
 
 
 @dataclass
-class NativeFun(TopObject):
+class NativeFun(Item):
     name: str = ""
     callback: "None" = None
 
@@ -75,7 +75,7 @@ def _scanf_resolve(self, res):
     if len(self.args) != 1 + num_formats:
         res.throw(
             self,
-            f"número de argumentos admitido por esta llamada de printf tiene que ser {1 + num_formats}, no {len(self.args)}",
+            f"número de argumentos admitido por esta llamada de scanf tiene que ser {1 + num_formats}, no {len(self.args)}",
         )
 
     res.resolve_exp(self.args[0])
@@ -103,10 +103,12 @@ native_functions = {
     "printf": NativeFun(
         name="printf",
         callback=_printf_resolve,
+        typ=TypeVoid.as_ptr(),
     ),
     "scanf": NativeFun(
         name="printf",
         callback=_scanf_resolve,
+        typ=TypeVoid.as_ptr(),
     ),
     "malloc": Fun(
         name="malloc",

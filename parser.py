@@ -10,6 +10,8 @@ class CLexer(Lexer):
     tokens = {
         NUM,
         NUM_LIT,
+        ID,
+        STR,
         OR,
         AND,
         EQ_EQ,
@@ -18,8 +20,15 @@ class CLexer(Lexer):
         LESSER_EQ,
         SHIFT_L,
         SHIFT_R,
-        ID,
-        STR,
+        PLUS_EQ,
+        MINUS_EQ,
+        STAR_EQ,
+        SLASH_EQ,
+        SHIFTL_EQ,
+        SHIFTR_EQ,
+        LOGAND_EQ,
+        LOGOR_EQ,
+        XOR_EQ,
         KW_INT,
         KW_VOID,
         KW_RETURN,
@@ -83,6 +92,16 @@ class CLexer(Lexer):
     LESSER_EQ = r"<="
     SHIFT_L = r"<<"
     SHIFT_R = r">>"
+
+    PLUS_EQ = r"+="
+    MINUS_EQ = r"-="
+    STAR_EQ = r"*="
+    SLASH_EQ = r"/="
+    SHIFTL_EQ = r"<<="
+    SHIFTR_EQ = r">>="
+    LOGAND_EQ = r"&="
+    LOGOR_EQ = r"|="
+    XOR_EQ = r"^="
 
     def error(self, t):
         tkn = Token()
@@ -282,7 +301,7 @@ class CParser(Parser):
     def exp_stmt(self, p):
         return ExpStmt(pos=p[0].pos, exp=p[0])
 
-    # --- Return Stmt --- #
+    # --- Return Statement --- #
 
     @_(r'KW_RETURN ";"')
     def return_stmt(self, _):
@@ -291,6 +310,8 @@ class CParser(Parser):
     @_(r'KW_RETURN exp ";"')
     def return_stmt(self, p):
         return ReturnStmt(pos=p.lineno, exp=p[1])
+
+    # --- Block Statement --- #
 
     @_(r'"{" body "}"')
     def block_stmt(self, p):
@@ -342,16 +363,16 @@ class CParser(Parser):
     def var_decl_exp(self, p):
         return None
 
-    @_(r'array_idxs "[" NUM "]"')
+    @_(r'"[" NUM "]" array_idxs')
     def array_idxs(self, p):
-        if p[2] == 0:
+        if p[1] == 0:
             tkn = Token()
-            tkn.value = f"[{p[2]}]"
+            tkn.value = f"[{p[1]}]"
             tkn.lineno = self.lineno
             raise ParserError(tkn)
 
-        p[0].append(p[2])
-        return p[0]
+        p[3].append(p[1])
+        return p[3]
 
     @_(r"")
     def array_idxs(self, p):
@@ -393,9 +414,31 @@ class CParser(Parser):
 
     # --- Assignment --- #
 
-    @_('unary "=" assign')
+    @_(
+        'unary "=" assign',
+        "unary PLUS_EQ assign",
+        "unary MINUS_EQ assign",
+        "unary STAR_EQ assign",
+        "unary SLASH_EQ assign",
+        "unary SHIFTL_EQ assign",
+        "unary SHIFTR_EQ assign",
+        "unary LOGAND_EQ assign",
+        "unary LOGOR_EQ assign",
+        "unary XOR_EQ assign",
+    )
     def assign(self, p):
-        return AssignExp(pos=p[0].pos, var=p[0], exp=p[2])
+        lval = p[0]
+        if p[1] != "=":
+            rval = BinaryExp(
+                pos=p.lineno,
+                exp1=VarExp(pos=p.lineno),
+                op=p[1][:-1],
+                exp2=p[2],
+            )
+        else:
+            rval = p[2]
+
+        return AssignExp(pos=p[0].pos, var=lval, exp=rval)
 
     @_("or_exp")
     def assign(self, p):
@@ -427,7 +470,7 @@ class CParser(Parser):
     def or_bin(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op="|", exp2=p[2])
 
-    @_(r'xor_bin')
+    @_(r"xor_bin")
     def or_bin(self, p):
         return p[0]
 
@@ -437,7 +480,7 @@ class CParser(Parser):
     def xor_bin(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op="^", exp2=p[2])
 
-    @_(r'and_bin')
+    @_(r"and_bin")
     def xor_bin(self, p):
         return p[0]
 
@@ -447,7 +490,7 @@ class CParser(Parser):
     def and_bin(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op="&", exp2=p[2])
 
-    @_(r'comp_exp')
+    @_(r"comp_exp")
     def and_bin(self, p):
         return p[0]
 
@@ -470,7 +513,7 @@ class CParser(Parser):
 
     # --- Lshift/Rshift --- #
 
-    @_(r'shiftop SHIFT_R sum', r'shiftop SHIFT_L sum')
+    @_(r"shiftop SHIFT_R sum", r"shiftop SHIFT_L sum")
     def shiftop(self, p):
         return BinaryExp(pos=p[0].pos, exp1=p[0], op=p[1], exp2=p[2])
 
